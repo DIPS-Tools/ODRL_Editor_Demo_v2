@@ -1,0 +1,40 @@
+{
+  "@context": "http://www.w3.org/ns/odrl/2/",
+  "@type": "Set",
+  "uid": "urn:policy:v123",
+  "profile": "Standard",
+  "assigner": "creator_vids",
+  "assignee": "all_users",
+  "target": "asset5678.png",
+  "permission": {
+    "target": "asset5678.png",
+    "action": "https://w3id.org/dpv/owl#Access",
+    "constraint": [
+      {
+        "leftOperand": "http://www.w3.org/ns/odrl/2/count",
+        "operator": "http://www.w3.org/ns/odrl/2/gt",
+        "rightOperand": "200"
+      },
+      {
+        "leftOperand": "http://www.w3.org/ns/odrl/2/delayPeriod",
+        "operator": "http://www.w3.org/ns/odrl/2/eq",
+        "rightOperand": "6"
+      }
+    ],
+    "duty": {
+      "action": "Compensate creator_vids",
+      "constraint": [
+        {
+          "leftOperand": "http://www.w3.org/ns/odrl/2/fileFormat",
+          "operator": "http://www.w3.org/ns/odrl/2/isAnyOf",
+          "rightOperand": "pdf"
+        },
+        {
+          "leftOperand": "http://www.w3.org/ns/odrl/2/elapsedTime",
+          "operator": "http://www.w3.org/ns/odrl/2/lt",
+          "rightOperand": "10"
+        }
+      ]
+    }
+  }
+}

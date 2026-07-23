@@ -1,0 +1,40 @@
+{
+  "@context": "http://www.w3.org/ns/odrl/2/",
+  "@type": "Agreement",
+  "uid": "urn:policy:v123",
+  "profile": "Standard",
+  "assigner": "creator_vids",
+  "assignee": "all_users",
+  "target": "asset5678.png",
+  "permission": {
+    "target": "asset5678.png",
+    "action": "http://www.w3.org/ns/odrl/2/display",
+    "constraint": [
+      {
+        "leftOperand": "dateTime",
+        "operator": "lt",
+        "rightOperand": "2027-01-01"
+      },
+      {
+        "leftOperand": "spatial",
+        "operator": "eq",
+        "rightOperand": "geo:UK"
+      }
+    ],
+    "duty": {
+      "action": "Compensate creator_vids",
+      "constraint": [
+        {
+          "leftOperand": "dateTime",
+          "operator": "gt",
+          "rightOperand": "2024-01-01"
+        },
+        {
+          "leftOperand": "spatial",
+          "operator": "eq",
+          "rightOperand": "geo:EUR"
+        }
+      ]
+    }
+  }
+}

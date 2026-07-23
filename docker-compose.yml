@@ -1,0 +1,19 @@
+services:
+  backend:
+    build:
+      context: ./backend  # Adjust to your FastAPI folder path
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./backend/POLICIES:/app/POLICIES  # Persist policies on the host machine
+      - ./backend/DEFAULT_VOCABULARIES:/app/DEFAULT_VOCABULARIES  # Persist policies on the host machine
+
+  frontend:
+    build:
+      context: ./frontend # Adjust to your React folder path
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend

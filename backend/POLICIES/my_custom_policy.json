@@ -1,0 +1,52 @@
+{
+  "@context": "http://www.w3.org/ns/odrl/2/",
+  "@type": "Set",
+  "uid": "urn:policy:v123",
+  "profile": "Standard",
+  "target": "asset5678.png",
+  "permission": [
+    {
+      "target": "asset5678.png",
+      "action": "odrl:display",
+      "constraint": [
+        {
+          "leftOperand": "dateTime",
+          "operator": "lt",
+          "rightOperand": "2027-01-01"
+        },
+        {
+          "leftOperand": "spatial",
+          "operator": "eq",
+          "rightOperand": "geo:UK"
+        }
+      ],
+      "duty": {
+        "action": "Compensate creator_vids",
+        "constraint": [
+          {
+            "leftOperand": "dateTime",
+            "operator": "gt",
+            "rightOperand": "2024-01-01"
+          },
+          {
+            "leftOperand": "spatial",
+            "operator": "eq",
+            "rightOperand": "geo:EUR"
+          }
+        ]
+      }
+    },
+    {
+      "target": "new_asset_target.mp4",
+      "action": "odrl:display"
+    },
+    {
+      "target": "new_asset_target.mp4",
+      "action": "odrl:display"
+    },
+    {
+      "target": "new_asset_target.mp4",
+      "action": "odrl:display"
+    }
+  ]
+}
