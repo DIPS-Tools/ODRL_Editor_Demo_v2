@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite' // <-- Imports the new engine
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     tailwindcss(), // <-- Runs Tailwind natively inside Vite

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { useOdrlPolicy } from './useOdrlPolicy';
 import { renderLeftOperandSelect, renderOperatorSelect, renderRightOperandInput } from './components/ConstraintHelpers';
 
@@ -14,6 +14,251 @@ export default function OdrlEditor() {
     dbActions, dbPurposes, dbLeftOperands, dbOperators,
     fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl
   } = useOdrlPolicy();
+
+  // State for feature under development modal
+  const [showDevModal, setShowDevModal] = useState(false);
+
+  // State for toggling policy code format view (JSON-LD vs TTL)
+  const [codeViewFormat, setCodeViewFormat] = useState('JSON-LD');
+
+  // Ref for hidden file input used in uploading a local policy file
+  const fileInputRef = useRef(null);
+
+  // Helper function to fully convert JSON-LD policy object into valid Turtle (TTL) syntax
+  const convertJsonLdToTtl = (jsonLdString) => {
+    try {
+      const data = JSON.parse(jsonLdString);
+      let ttl = `@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n`;
+      ttl += `@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n`;
+      ttl += `@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n`;
+      ttl += `@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\n`;
+
+      const policyId = data["@id"] || data.uid || "_:policy";
+      const policyType = data["@type"] || "odrl:Set";
+
+      ttl += `<${policyId}>\n`;
+      ttl += `  a ${policyType.startsWith('odrl:') ? policyType : `odrl:${policyType}`} ;\n`;
+
+      if (data.profile) {
+        ttl += `  odrl:profile <${data.profile}> ;\n`;
+      }
+      if (data.conflict) {
+        ttl += `  odrl:conflict odrl:${data.conflict} ;\n`;
+      }
+      if (data.assigner) {
+        ttl += `  odrl:assigner <${data.assigner}> ;\n`;
+      }
+      if (data.assignee) {
+        ttl += `  odrl:assignee <${data.assignee}> ;\n`;
+      }
+
+      // Handle global targets
+      const targets = data.target ? (Array.isArray(data.target) ? data.target : [data.target]) : [];
+      targets.forEach(t => {
+        const tId = typeof t === 'string' ? t : (t["@id"] || '');
+        if (tId) {
+          ttl += `  odrl:target <${tId}> ;\n`;
+        }
+      });
+
+      // Helper to format constraints/refinements
+      const formatConstraints = (constraints, indent = "    ") => {
+        if (!constraints || constraints.length === 0) return "";
+        let cTtl = "";
+        constraints.forEach(c => {
+          const left = c.leftOperand || '';
+          const op = c.operator || '=';
+          const right = c.rightOperand || '';
+          cTtl += `${indent}odrl:constraint [\n`;
+          cTtl += `${indent}  odrl:leftOperand <${left}> ;\n`;
+          cTtl += `${indent}  odrl:operator odrl:${op === '=' ? 'eq' : op === '<' ? 'lt' : op === '>' ? 'gt' : op} ;\n`;
+          cTtl += `${indent}  odrl:rightOperand "${right}"\n`;
+          cTtl += `${indent}] ;\n`;
+        });
+        return cTtl;
+      };
+
+      // Helper to format parties (assigner/assignee)
+      const formatParty = (party, roleName, indent = "    ") => {
+        if (!party) return "";
+        let pTtl = `${indent}odrl:${roleName} [\n`;
+        pTtl += `${indent}  a odrl:${party.type || 'LegalEntity'} ;\n`;
+        if (party.constraints && party.constraints.length > 0) {
+          party.constraints.forEach(c => {
+            pTtl += `${indent}  odrl:constraint [\n`;
+            pTtl += `${indent}    odrl:leftOperand <${c.leftOperand}> ;\n`;
+            pTtl += `${indent}    odrl:operator odrl:${c.operator === '=' ? 'eq' : c.operator} ;\n`;
+            pTtl += `${indent}    odrl:rightOperand "${c.rightOperand}"\n`;
+            pTtl += `${indent}  ] ;\n`;
+          });
+        }
+        pTtl += `${indent}] ;\n`;
+        return pTtl;
+      };
+
+      // Handle permissions recursively
+      const permissions = data.permission ? (Array.isArray(data.permission) ? data.permission : [data.permission]) : [];
+      permissions.forEach((perm) => {
+        ttl += `  odrl:permission [\n`;
+        
+        // Action
+        if (perm.action) {
+          const actionVal = typeof perm.action === 'string' ? perm.action : (perm.action.rdfValue || perm.action["@id"] || '');
+          ttl += `    odrl:action <${actionVal}> ;\n`;
+          if (perm.action.refinement && perm.action.refinement.length > 0) {
+            perm.action.refinement.forEach(ref => {
+              ttl += `    odrl:refinement [\n`;
+              ttl += `      odrl:leftOperand <${ref.leftOperand}> ;\n`;
+              ttl += `      odrl:operator odrl:${ref.operator === '=' ? 'eq' : ref.operator} ;\n`;
+              ttl += `      odrl:rightOperand "${ref.rightOperand}"\n`;
+              ttl += `    ] ;\n`;
+            });
+          }
+        }
+
+        // Target inside permission
+        if (perm.target) {
+          const pTarget = typeof perm.target === 'string' ? perm.target : (perm.target["@id"] || '');
+          if (pTarget) {
+            ttl += `    odrl:target <${pTarget}> ;\n`;
+          }
+        }
+
+        // Parties inside permission
+        if (perm.assigner) {
+          const assignerVal = typeof perm.assigner === 'string' ? perm.assigner : perm.assigner["@id"];
+          ttl += `    odrl:assigner <${assignerVal}> ;\n`;
+        }
+        if (perm.assignee) {
+          const assigneeVal = typeof perm.assignee === 'string' ? perm.assignee : perm.assignee["@id"];
+          ttl += `    odrl:assignee <${assigneeVal}> ;\n`;
+        }
+
+        // Rule-level constraints
+        if (perm.constraint) {
+          const constraints = Array.isArray(perm.constraint) ? perm.constraint : [perm.constraint];
+          constraints.forEach(c => {
+            ttl += `    odrl:constraint [\n`;
+            ttl += `      odrl:leftOperand <${c.leftOperand}> ;\n`;
+            ttl += `      odrl:operator odrl:${c.operator === '=' ? 'eq' : c.operator} ;\n`;
+            ttl += `      odrl:rightOperand "${c.rightOperand}"\n`;
+            ttl += `    ] ;\n`;
+          });
+        }
+
+        // Duties inside permission
+        if (perm.duty) {
+          const duties = Array.isArray(perm.duty) ? perm.duty : [perm.duty];
+          duties.forEach(duty => {
+            ttl += `    odrl:duty [\n`;
+            if (duty.action) {
+              const dAction = typeof duty.action === 'string' ? duty.action : (duty.action.rdfValue || duty.action["@id"] || '');
+              ttl += `      odrl:action <${dAction}> ;\n`;
+            }
+            if (duty.consequence) {
+              const consequences = Array.isArray(duty.consequence) ? duty.consequence : [duty.consequence];
+              consequences.forEach(cons => {
+                ttl += `      odrl:consequence [\n`;
+                if (cons.action) {
+                  const cAction = typeof cons.action === 'string' ? cons.action : (cons.action.rdfValue || cons.action["@id"] || '');
+                  ttl += `        odrl:action <${cAction}> ;\n`;
+                }
+                ttl += `      ] ;\n`;
+              });
+            }
+            ttl += `    ] ;\n`;
+          });
+        }
+
+        ttl += `  ] ;\n`;
+      });
+
+      // Clean trailing punctuation
+      if (ttl.endsWith(';\n')) {
+        ttl = ttl.slice(0, -2) + ' .\n';
+      } else {
+        ttl += '.\n';
+      }
+
+      return ttl;
+    } catch (e) {
+      return `# Error parsing JSON-LD for TTL conversion: ${e.message}\n\n` + jsonLdString;
+    }
+  };
+
+  // Handler for downloading the current policy as a .json file
+  const handleDownloadPolicy = () => {
+    try {
+      const blob = new Blob([jsonLd], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = policy.uid ? `${policy.uid.replace(/[:\/]/g, '_')}.json` : 'policy.json';
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Failed to download policy JSON file:", e);
+    }
+  };
+
+  // Handler for uploading and parsing a local policy .json file into the editor
+  const handleUploadPolicyFile = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result;
+        if (typeof content === 'string') {
+          const parsedJson = JSON.parse(content);
+          
+          // Normalize and load into internal policy structure using existing hook setters if available
+          // (leveraging setPolicy which updates the active policy object similarly to handleLoadServerPolicy)
+          const newTargets = parsedJson.target ? (Array.isArray(parsedJson.target) ? parsedJson.target : [parsedJson.target]) : [];
+          
+          const newPermissions = (parsedJson.permission ? (Array.isArray(parsedJson.permission) ? parsedJson.permission : [parsedJson.permission]) : []).map(p => ({
+            action: { name: typeof p.action === 'string' ? p.action : (p.action?.rdfValue || p.action?.["@id"] || ''), constraints: [] },
+            assigner: p.assigner ? { type: 'Legal Entity', constraints: [] } : null,
+            actor: p.assignee ? { type: 'Legal Entity', constraints: [] } : null,
+            purpose: null,
+            target: p.target ? { name: typeof p.target === 'string' ? p.target : (p.target?.["@id"] || ''), constraints: [] } : null,
+            constraints: p.constraint ? (Array.isArray(p.constraint) ? p.constraint : [p.constraint]).map(c => ({ leftOperand: c.leftOperand, operator: c.operator, rightOperand: c.rightOperand })) : [],
+            duties: p.duty ? (Array.isArray(p.duty) ? p.duty : [p.duty]).map(d => ({
+              action: typeof d.action === 'string' ? d.action : (d.action?.rdfValue || d.action?.["@id"] || ''),
+              actionObj: { name: typeof d.action === 'string' ? d.action : '', constraints: [] },
+              assigner: null,
+              actor: null,
+              constraints: d.constraint ? (Array.isArray(d.constraint) ? d.constraint : [d.constraint]).map(c => ({ leftOperand: c.leftOperand, operator: c.operator, rightOperand: c.rightOperand })) : [],
+              consequences: []
+            })) : []
+          }));
+
+          setPolicy({
+            type: parsedJson["@type"] || 'Set',
+            uid: parsedJson.uid || parsedJson["@id"] || '',
+            profile: parsedJson.profile || '',
+            assigner: parsedJson.assigner || null,
+            assignee: parsedJson.assignee || null,
+            conflict: parsedJson.conflict || null,
+            targets: newTargets,
+            permissions: newPermissions
+          });
+          setActivePermissionIdx(0);
+        }
+      } catch (err) {
+        console.error("Failed to parse uploaded policy JSON file:", err);
+        alert("Invalid JSON file format.");
+      } finally {
+        // Reset file input value so uploading the same file again triggers change event
+        event.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
 
   // Policy Metadata Target Handlers
   const addMetadataTarget = () => setPolicy({ ...policy, targets: [...(policy.targets || []), ''] });
@@ -385,6 +630,21 @@ export default function OdrlEditor() {
 
             <button onClick={() => setShowVocabModal(true)} className="bg-slate-700 hover:bg-slate-500 text-white font-semibold text-xs py-1 px-2.5 rounded flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-400 shadow-xs leading-tight">
               ➕ Add Simple Vocabulary
+            </button>
+
+            <button onClick={handleDownloadPolicy} className="bg-slate-700 hover:bg-slate-500 text-white font-semibold text-xs py-1 px-2.5 rounded flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-400 shadow-xs leading-tight">
+              💾 Download Current Policy
+            </button>
+
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleUploadPolicyFile} 
+              accept=".json" 
+              className="hidden" 
+            />
+            <button onClick={() => fileInputRef.current?.click()} className="bg-slate-700 hover:bg-slate-500 text-white font-semibold text-xs py-1 px-2.5 rounded flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-400 shadow-xs leading-tight">
+              📤 Upload Policy File
             </button>
           </div>
         </div>
@@ -932,6 +1192,8 @@ export default function OdrlEditor() {
             <div className="flex items-center gap-3 border-b pb-1">
               <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500">RULE TABS</h2>
               <button onClick={addPermissionBlock} className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Permission</button>
+              <button onClick={() => setShowDevModal(true)} className="bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Prohibition</button>
+              <button onClick={() => setShowDevModal(true)} className="bg-amber-600 hover:bg-amber-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Obligation</button>
             </div>
             <div className="flex flex-wrap gap-2 pt-1 overflow-x-auto max-h-24">
               {policy.permissions?.length > 0 ? (
@@ -947,7 +1209,7 @@ export default function OdrlEditor() {
           </section>
         </div>
 
-        {/* Right Panel: Human Summary & JSON-LD Output */}
+        {/* Right Panel: Human Summary & JSON-LD / TTL Output */}
         <section className="w-1/4 flex flex-col gap-4 overflow-hidden h-full">
           <div className="h-1/3 bg-white rounded-lg p-4 shadow border border-slate-200 flex flex-col">
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2 mb-2">Human Summary (Live)</h2>
@@ -1009,7 +1271,17 @@ export default function OdrlEditor() {
 
           <div className="h-2/3 bg-white rounded-lg p-4 shadow border border-slate-200 flex flex-col">
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2 mb-2">JSON-LD / TTL Output</h2>
-            <textarea className="w-full flex-1 font-mono text-[11px] bg-slate-900 text-emerald-400 p-3 rounded border border-slate-900 resize-none overflow-y-auto" value={jsonLd} readOnly />
+            <textarea 
+              className="w-full flex-1 font-mono text-[11px] bg-slate-900 text-emerald-400 p-3 rounded border border-slate-900 resize-none overflow-y-auto mb-2" 
+              value={codeViewFormat === 'JSON-LD' ? jsonLd : convertJsonLdToTtl(jsonLd)} 
+              readOnly 
+            />
+            <button 
+              onClick={() => setCodeViewFormat(codeViewFormat === 'JSON-LD' ? 'TTL' : 'JSON-LD')} 
+              className="w-full bg-slate-700 hover:bg-slate-800 text-white font-medium py-1.5 px-3 rounded shadow-sm text-xs transition-colors cursor-pointer"
+            >
+              {codeViewFormat === 'JSON-LD' ? 'Display TTL' : 'Display JSON-LD'}
+            </button>
           </div>
         </section>
 
@@ -1024,6 +1296,21 @@ export default function OdrlEditor() {
           </div>
         )}
       </main>
+
+      {/* Feature Under Development Modal */}
+      {showDevModal && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full flex flex-col gap-4 text-center">
+            <p className="text-sm font-medium text-slate-800">Feature currently under development</p>
+            <button 
+              onClick={() => setShowDevModal(false)} 
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-1.5 px-4 rounded text-xs transition-colors mx-auto"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Vocabulary Manager Modal */}
       {showVocabModal && (
