@@ -6,11 +6,38 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
+
+# Accept base path build argument (defaults to './')
+ARG VITE_BASE_PATH=./
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
+
 RUN NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
 # Stage 2: Serve with Nginx
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# Copy custom nginx configuration for API routing & SPA fallback
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
+#```[cite: 2]
+
+### Step 4: How to build and run for each environment
+
+# * **Environment 1 (Local `http://localhost:5173` via Vite dev server):**
+#  ```bash
+#   npm run dev
+
+# Environment 3 (Remote server at
+#      [https://dips.soton.ac.uk/odrl-editor-demo](https://dips.soton.ac.uk/odrl-editor-demo)):
+# When building the image on your remote machine, pass the build argument 
+#   so Vite compiles all asset paths relative to the subpath:
+# docker compose up --build (for http://localhost:3050
+# docker compose build -- build-arg VITE_BASE_PATH=/odrl-editor-demo
+# docker compose up -d
+
+# docker compose down
+# docker compose build --no-cache
+# docker compose up
