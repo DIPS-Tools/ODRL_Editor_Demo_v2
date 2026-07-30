@@ -49,7 +49,7 @@ None currently.
 Install python (with requirements.txt) and node.js (with Vite)
 
 In the backend directory - python main.python
-In the frontend directory - npm run developed
+In the frontend directory - npm run dev
 
 You should now be able to access the application via browser at http:localhost:5173
 
