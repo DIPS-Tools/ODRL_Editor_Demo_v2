@@ -52,7 +52,7 @@ export function useOdrlPolicy() {
   // Fetch server file lists from backend
   const fetchServerFiles = async () => {
     try {
-      const res = await fetch('/api/policies'); // Changed from http://127.0.0.1:8005/api/policies
+      const res = await fetch('api/policies'); // Changed from http://127.0.0.1:8005/api/policies
       if (res.ok) {
         const files = await res.json();
         setServerFiles(files);
@@ -66,11 +66,11 @@ export function useOdrlPolicy() {
   const fetchGraphVocabularies = async () => {
     try {
       const [actRes, purRes, leftRes, opRes, rightRes] = await Promise.all([
-        fetch('/api/actions'),
-        fetch('/api/purposes'),
-        fetch('/api/leftOperands'),
-        fetch('/api/operators'),
-        fetch('/api/rightOperands')
+        fetch('api/actions'),
+        fetch('api/purposes'),
+        fetch('api/leftOperands'),
+        fetch('api/operators'),
+        fetch('api/rightOperands')
       ]);
 
       if (actRes.ok) setDbActions(await actRes.json());
