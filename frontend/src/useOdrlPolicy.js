@@ -92,7 +92,7 @@ export function useOdrlPolicy() {
   const handleLoadServerPolicy = async (filename) => {
     try {
       setBackendStatus(`Reading ${filename}...`);
-      const res = await fetch(`http://127.0.0.1:8005/api/policies/${filename}`);
+      const res = await fetch(`api/policies/${filename}`); // Changed from http://127.0.0.1:8005/api/policies
       if (!res.ok) {
         const errData = await res.json();
         setBackendStatus(`Load failed: ${errData.detail || res.statusText}`);

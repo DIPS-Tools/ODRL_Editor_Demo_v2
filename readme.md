@@ -5,11 +5,6 @@ The functionality will be changing rapidly through to the end of August 2026
 
 You can access a live demo version of the current functionalities at [DIPS](https://dips.soton.ac.uk/odrl-editor-demo). 
 
-In the very short term there is an issue with dropdown population at live demo site.
-We are fixing this now and is not present in local deployments if you wish to look a this (see installation notes below)
-Other main functionality runs correctly.
-
-
 
 ## **Main Goal/Functionalities**
 
