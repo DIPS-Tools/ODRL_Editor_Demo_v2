@@ -5,7 +5,8 @@ import { useState, useEffect } from 'react';
  * vocabulary data fetching, and JSON-LD compilation.
  */
 export function useOdrlPolicy() {
-  const [activePermissionIdx, setActivePermissionIdx] = useState(0);
+  // Use an object structure for tracking active rules across permissions and prohibitions
+  const [activePermissionIdx, setActivePermissionIdx] = useState({ type: 'permission', idx: 0 });
 
   // Vocabulary feature state
   const [showVocabModal, setShowVocabModal] = useState(false);
@@ -22,7 +23,7 @@ export function useOdrlPolicy() {
 @prefix schema: <https://schema.org/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .`);
 
-  // Core policy object state initialization
+  // Core policy object state initialization (including prohibitions array)
   const [policy, setPolicy] = useState({
     type: 'Agreement',
     uid: '',
@@ -31,7 +32,8 @@ export function useOdrlPolicy() {
     assignee: null,
     conflict: null,
     targets: [],
-    permissions: []
+    permissions: [],
+    prohibitions: []
   });
 
   const [jsonLd, setJsonLd] = useState('');
@@ -52,7 +54,7 @@ export function useOdrlPolicy() {
   // Fetch server file lists from backend
   const fetchServerFiles = async () => {
     try {
-      const res = await fetch('api/policies'); // Changed from http://127.0.0.1:8005/api/policies
+      const res = await fetch('api/policies');
       if (res.ok) {
         const files = await res.json();
         setServerFiles(files);
@@ -79,279 +81,465 @@ export function useOdrlPolicy() {
       if (opRes.ok) setDbOperators(await opRes.json());
       if (rightRes.ok) setDbRightOperands(await rightRes.json());
     } catch (err) {
-      console.error("Error retrieving SPARQL graph vocabulary rows:", err);
+      console.error("Could not fetch graph vocabularies:", err);
     }
   };
 
   useEffect(() => {
-    fetchServerFiles();
     fetchGraphVocabularies();
   }, []);
 
-  // Load a specified policy file from the backend storage directory
-  const handleLoadServerPolicy = async (filename) => {
-    try {
-      setBackendStatus(`Reading ${filename}...`);
-      const res = await fetch(`api/policies/${filename}`); // Changed from http://127.0.0.1:8005/api/policies
-      if (!res.ok) {
-        const errData = await res.json();
-        setBackendStatus(`Load failed: ${errData.detail || res.statusText}`);
-        return;
-      }
-      
-      const importedPolicy = await res.json();
-      setPolicy(importedPolicy);
-      setActivePermissionIdx(0);
-      setShaclResult(null);
-      setShowShaclReport(false);
-      
-      setBackendStatus(`Loaded policy successfully from ${filename}`);
-      setShowDropdown(false);
-    } catch (err) {
-      setBackendStatus('Network execution block error during ingestion.');
-    }
-  };
-
-  // Helper mapping functions for building structured ODRL constraints
-  const mapConstraints = (constraintsArray) => {
-    return (constraintsArray || []).map(c => ({
-      "leftOperand": c.leftOperand || 'http://www.w3.org/ns/odrl/2/dateTime',
-      "operator": c.operator === '=' ? 'eq' : c.operator === '<' ? 'lt' : c.operator === '>' ? 'gt' : c.operator,
+  // Helper builder for constraints / refinements mapping
+  const buildConstraintsObj = (constraints) => {
+    if (!constraints || constraints.length === 0) return undefined;
+    return constraints.map(c => ({
+      "@type": "Constraint",
+      "leftOperand": c.leftOperand,
+      "operator": c.operator,
       "rightOperand": c.rightOperand
     }));
   };
 
-  const formatPurposeValue = (val) => {
-    if (!val) return '';
-    if (val.startsWith('http') || val.startsWith('odrl:')) {
-      return val;
-    }
-    return `odrl:${val.replace(/[^a-zA-Z0-9]/g, '')}`;
-  };
-
-  // Automatic compilation effect mapping internal state to ODRL JSON-LD document specs
+  // Compile policy state into JSON-LD whenever policy data changes
   useEffect(() => {
-    if (!policy) return;
+    try {
+      const doc = {
+        "@context": {
+          "@vocab": "http://www.w3.org/ns/odrl/2/",
+          "odrl": "http://www.w3.org/ns/odrl/2/"
+        },
+        "@type": policy.type || "Set",
+        "@id": policy.uid || "urn:policy:unidentified"
+      };
 
-    const compiledPermissions = (policy.permissions || []).map(perm => {
-      const baseGlobalConstraints = mapConstraints(perm.constraints || []);
-      let finalGlobalConstraints = [...baseGlobalConstraints];
+      if (policy.profile) doc.profile = policy.profile;
+      if (policy.assigner) doc.assigner = policy.assigner;
+      if (policy.assignee) doc.assignee = policy.assignee;
+      if (policy.conflict) doc.conflict = policy.conflict;
 
-      // Restored purpose compilation routing into global rule constraints block with proper URI preservation
-      if (perm.purpose) {
-        const primaryPurposeConstraint = {
-          "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
-          "operator": "eq",
-          "rightOperand": formatPurposeValue(perm.purpose.name)
-        };
-
-        if (perm.purpose.constraints && perm.purpose.constraints.length > 0) {
-          const subConstraints = mapConstraints(perm.purpose.constraints);
-          const purposeBundle = {
-            "and": [
-              primaryPurposeConstraint,
-              ...subConstraints
-            ]
+      if (policy.targets && policy.targets.length > 0) {
+        const validTargets = policy.targets.filter(t => t && t.trim() !== '');
+        if (validTargets.length === 1) {
+          doc.target = validTargets[0];
+        } else if (validTargets.length > 1) {
+          doc.target = {
+             "@type": "odrl:AssetCollection",
+             // "source": validTargets.map(t => ({ "@id": t }))
+			 "source": validTargets.map(t => ( t ))
           };
-          finalGlobalConstraints.unshift(purposeBundle);
-        } else {
-          finalGlobalConstraints.unshift(primaryPurposeConstraint);
         }
       }
+	  
 
-      const compiledDuties = perm.duties?.map(d => {
-        const mappedConsequences = d.consequences?.map(c => ({
-          "action": c.action,
-          ...(c.constraints?.length > 0 && {
-            "constraint": mapConstraints(c.constraints)
-          })
-        })) || [];
+      // Serialize Permissions
+      if (policy.permissions && policy.permissions.length > 0) {
+        doc.permission = policy.permissions.map(perm => {
+          const pObj = {};
 
-        const rawDutyAction = (d.actionObj && d.actionObj.name) || d.action || '';
-        const parsedDutyActionValue = (rawDutyAction.startsWith('http') || rawDutyAction.startsWith('odrl:')) 
-          ? rawDutyAction 
-          : (rawDutyAction ? `odrl:${rawDutyAction}` : '');
+          if (perm.action?.name) {
+            if (perm.action.constraints && perm.action.constraints.length > 0) {
+              pObj.action = {
+                "@id": perm.action.name,
+                "refinement": buildConstraintsObj(perm.action.constraints)
+              };
+            } else {
+              pObj.action = perm.action.name;
+            }
+          }
 
-        const dutyActionConstraints = d.actionObj?.constraints || [];
+          //if (perm.target?.name) {
+          //  pObj.target = perm.target.name;
+          // }
+		  
+		  if (perm.target?.name) {
+            const targetConstraints = buildConstraintsObj(perm.target.constraints);
+            if (targetConstraints) {
+              pObj.target = {
+                "source": perm.target.name,
+                "refinement": targetConstraints
+              };
+            } else {
+              pObj.target = perm.target.name;
+            }
+          }
 
-        return {
-          "action": dutyActionConstraints.length > 0 ? {
-            "value": parsedDutyActionValue,
-            "refinement": mapConstraints(dutyActionConstraints)
-          } : parsedDutyActionValue,
+          //if (perm.assigner) {
+          //  pObj.assigner = {
+          //    "@type": perm.assigner.type,
+          //    ...(buildConstraintsObj(perm.assigner.constraints) && { "constraint": buildConstraintsObj(perm.assigner.constraints) })
+          //  };
+          //}
+		  
+		  if (perm.assigner) {
+            // If there are constraints, keep the object structure; otherwise, just assign the type string
+            const constraintsObj = buildConstraintsObj(perm.assigner.constraints);
+  
+            if (constraintsObj) {
+               pObj.assigner = {
+               "@type": perm.assigner.type,
+               "constraint": constraintsObj
+               };
+            } else {
+               pObj.assigner = perm.assigner.type;
+            }
+          }
 
-          ...(d.assigner && {
-            "assigner": d.assigner.constraints?.length > 0 ? {
-              "source": d.assigner.type.startsWith('odrl:') ? d.assigner.type : `odrl:${d.assigner.type.replace(' ', '')}`,
-              "refinement": mapConstraints(d.assigner.constraints)
-            } : (d.assigner.type.startsWith('odrl:') ? d.assigner.type : `odrl:${d.assigner.type.replace(' ', '')}`)
-          }),
-          ...(d.actor && {
-            "assignee": d.actor.constraints?.length > 0 ? {
-              "source": d.actor.type.startsWith('odrl:') ? d.actor.type : `odrl:${d.actor.type.replace(' ', '')}`,
-              "refinement": mapConstraints(d.actor.constraints)
-            } : (d.actor.type.startsWith('odrl:') ? d.actor.type : `odrl:${d.actor.type.replace(' ', '')}`)
-          }),
-          ...(d.constraints?.length > 0 && {
-            "constraint": mapConstraints(d.constraints)
-          }),
-          ...(mappedConsequences.length > 0 && {
-            "consequence": mappedConsequences.length === 1 ? mappedConsequences[0] : mappedConsequences
-          })
-        };
-      });
+          if (perm.actor) {
+            //pObj.assignee = {
+            //  "@type": perm.actor.type,
+            //  ...(buildConstraintsObj(perm.actor.constraints) && { "constraint": buildConstraintsObj(perm.actor.constraints) })
+            //};
+			
+			// If there are constraints, keep the object structure; otherwise, just assign the type string
+            const constraintsObj = buildConstraintsObj(perm.actor.constraints);
+  
+            if (constraintsObj) {
+               pObj.assignee = {
+               "@type": perm.actor.type,
+               "constraint": constraintsObj
+               };
+            } else {
+               pObj.assignee = perm.actor.type;
+            }
+          }
 
-      const rawActionName = perm.action?.name || 'http://www.w3.org/ns/odrl/2/display';
-      const parsedActionValue = (rawActionName.startsWith('http') || rawActionName.startsWith('odrl:')) 
-        ? rawActionName 
-        : `odrl:${rawActionName}`;
+          //if (perm.purpose?.name) {
+          //  pObj.purpose = perm.purpose.name;
+          //}  
+		  
+		  //const globalConstraints = buildConstraintsObj(perm.constraints);
+          //if (globalConstraints) {
+          //  pObj.constraint = globalConstraints;
+          //}
+		  
+		  // Build constraints list for permission
+          let constraintsList = [];
+          const globalConstraints = buildConstraintsObj(perm.constraints);
 
-      return {
-        "target": perm.target?.constraints?.length > 0 ? {
-          "source": perm.target.name,
-          "refinement": mapConstraints(perm.target.constraints)
-        } : perm.target?.name,
+          if (perm.purpose?.name) {
+            const purposeConstraint = {
+              "@type": "Constraint",
+              "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
+              "operator": "eq",
+              "rightOperand": perm.purpose.name
+            };
+			
+			// Check specifically for purpose-specific constraints supplied by the user
+            const purposeConstraints = buildConstraintsObj(perm.purpose.constraints);
 
-        "action": (perm.target?.constraints?.length > 0 || perm.action?.constraints?.length > 0) ? {
-          "value": parsedActionValue,
-          "refinement": mapConstraints(perm.action?.constraints || [])
-        } : parsedActionValue,
+            // If user-supplied constraints exist, group them using 'and'
+            if (purposeConstraints && purposeConstraints.length > 0) {
+              constraintsList.push({
+                "@type": "LogicalConstraint",
+                "and": [
+                  purposeConstraint,
+                  ...purposeConstraints
+                ]
+              });
+            } else {
+              // Otherwise, just use the simple purpose constraint block
+              constraintsList.push(purposeConstraint);
+            }
+          }
+		  
+		  if (globalConstraints) {
+            // If no purpose but global constraints exist
+            constraintsList = constraintsList.concat(globalConstraints);
+          }
 
-        ...(perm.assigner && {
-          "assigner": perm.assigner.constraints?.length > 0 ? {
-            "source": perm.assigner.type.startsWith('odrl:') ? perm.assigner.type : `odrl:${perm.assigner.type.replace(' ', '')}`,
-            "refinement": mapConstraints(perm.assigner.constraints)
-          } : (perm.assigner.type.startsWith('odrl:') ? perm.assigner.type : `odrl:${perm.assigner.type.replace(' ', '')}`)
-        }),
+          if (constraintsList.length > 0) {
+            pObj.constraint = constraintsList;
+          }
+		 
 
-        ...(perm.actor && {
-          "assignee": perm.actor.constraints?.length > 0 ? {
-            "source": perm.actor.type.startsWith('odrl:') ? perm.actor.type : `odrl:${perm.actor.type.replace(' ', '')}`,
-            "refinement": mapConstraints(perm.actor.constraints)
-          } : (perm.actor.type.startsWith('odrl:') ? perm.actor.type : `odrl:${perm.actor.type.replace(' ', '')}`)
-        }),
+          
 
-        ...(finalGlobalConstraints.length > 0 && {
-          "constraint": finalGlobalConstraints
-        }),
+          if (perm.duties && perm.duties.length > 0) {
+            pObj.duty = perm.duties.map(duty => {
+              const dObj = {};
+			  
+              // FIXED: Check duty.actionObj for action name and refinements, fallback to duty.action
+              const dutyActionName = duty.actionObj?.name || duty.action;
+              if (dutyActionName) {
+                if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
+                  dObj.action = {
+                    "@id": dutyActionName,
+                    "refinement": buildConstraintsObj(duty.actionObj.constraints)
+                  };
+                } else {
+                  dObj.action = dutyActionName;
+                }
+              }
+		
+              //if (duty.assigner) {
+              //  dObj.assigner = { "@type": duty.assigner.type };
+              //}
+			  
+			  if (duty.assigner) {
+                // If there are constraints, keep the object structure; otherwise, just assign the type string
+                const constraintsObj = buildConstraintsObj(duty.assigner.constraints);
+  
+                if (constraintsObj) {
+                   dObj.assigner = {
+                   "@type": duty.assigner.type,
+                   "constraint": constraintsObj
+                   };
+                } else {
+                   dObj.assigner = duty.assigner.type;
+                }
+              }	  
+			  
+              //if (duty.actor) {
+              //  dObj.assignee = { "@type": duty.actor.type };
+              //}
+			  
+			  if (duty.actor) {
+                // If there are constraints, keep the object structure; otherwise, just assign the type string
+                const constraintsObj = buildConstraintsObj(duty.actor.constraints);
+  
+                if (constraintsObj) {
+                   dObj.actor = {
+                   "@type": duty.actor.type,
+                   "constraint": constraintsObj
+                   };
+                } else {
+                   dObj.actor = duty.actor.type;
+                }
+              }	  
+			  
+			  
+              const dutyConst = buildConstraintsObj(duty.constraints);
+              if (dutyConst) {
+                dObj.constraint = dutyConst;
+              }
+              if (duty.consequences && duty.consequences.length > 0) {
+                dObj.consequence = duty.consequences.map(cons => ({
+                  action: cons.action,
+                  ...(buildConstraintsObj(cons.constraints) && { constraint: buildConstraintsObj(cons.constraints) })
+                }));
+              }
+              return dObj;
+            });
+          }
 
-        ...(compiledDuties && compiledDuties.length > 0 && {
-          "duty": compiledDuties.length === 1 ? compiledDuties[0] : compiledDuties
-        })
-      };
-    });
+          return pObj;
+        });
+      }
 
-    let targetOutput = undefined;
-    if (policy.targets && policy.targets.length === 1) {
-      targetOutput = policy.targets[0];
-    } else if (policy.targets && policy.targets.length > 1) {
-      targetOutput = {
-        "@type": "AssetCollection",
-        "uid": policy.targets
-      };
+      // Serialize Prohibitions (Added to ensure block renders correctly)
+      if (policy.prohibitions && policy.prohibitions.length > 0) {
+        doc.prohibition = policy.prohibitions.map(prohib => {
+          const prObj = {};
+
+          if (prohib.action?.name) {
+            if (prohib.action.constraints && prohib.action.constraints.length > 0) {
+              prObj.action = {
+                "@id": prohib.action.name,
+                "refinement": buildConstraintsObj(prohib.action.constraints)
+              };
+            } else {
+              prObj.action = prohib.action.name;
+            }
+          }
+
+          //if (prohib.target?.name) {
+          //  prObj.target = prohib.target.name;
+          //}
+		  
+		  if (prohib.target?.name) {
+            const targetConstraints = buildConstraintsObj(prohib.target.constraints);
+            if (targetConstraints) {
+              prohib.target = {
+                "source": prohib.target.name,
+                "refinement": targetConstraints
+              };
+            } else {
+              prohib.target = prohib.target.name;
+            }
+          }
+
+          //if (prohib.assigner) {
+          //  prObj.assigner = {
+          //    "@type": prohib.assigner.type,
+          //    ...(buildConstraintsObj(prohib.assigner.constraints) && { "constraint": buildConstraintsObj(prohib.assigner.constraints) })
+          //  };
+          //}
+		  
+		  if (prohib.assigner) {
+            // If there are constraints, keep the object structure; otherwise, just assign the type string
+            const constraintsObj = buildConstraintsObj(prohib.assigner.constraints);
+  
+            if (constraintsObj) {
+               prObj.assigner = {
+               "@type": prohib.assigner.type,
+               "constraint": constraintsObj
+               };
+            } else {
+               prObj.assigner = prohib.assigner.type;
+            }
+          }
+
+          //if (prohib.actor) {
+          //  prObj.assignee = {
+          //    "@type": prohib.actor.type,
+          //    ...(buildConstraintsObj(prohib.actor.constraints) && { "constraint": buildConstraintsObj(prohib.actor.constraints) })
+          //  };
+          //}
+		  
+		  if (prohib.actor) {
+            // If there are constraints, keep the object structure; otherwise, just assign the type string
+            const constraintsObj = buildConstraintsObj(prohib.actor.constraints);
+  
+            if (constraintsObj) {
+               prObj.assignee = {
+               "@type": prohib.actor.type,
+               "constraint": constraintsObj
+               };
+            } else {
+               prObj.assignee = prohib.actor.type;
+            }
+          }
+
+          //if (prohib.purpose?.name) {
+          //  prObj.purpose = prohib.purpose.name;
+          //}		  
+
+          //const globalConstraints = buildConstraintsObj(prohib.constraints);
+          //if (globalConstraints) {
+          //  prObj.constraint = globalConstraints;
+          //}
+		  
+		  // Build constraints list for prohibition
+          let prohibConstraintsList = [];
+          const globalConstraintsProhib = buildConstraintsObj(prohib.constraints);
+
+          if (prohib.purpose?.name) {
+            const purposeConstraint = {
+              "@type": "Constraint",
+              "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
+              "operator": "eq",
+              "rightOperand": prohib.purpose.name
+            };
+			
+			// Check specifically for purpose-specific constraints supplied by the user
+            const purposeConstraintsProhib = buildConstraintsObj(prohib.purpose.constraints);
+
+            // If user-supplied constraints exist, group them using 'and'
+            if (purposeConstraintsProhib && purposeConstraintsProhib.length > 0) {
+              prohibConstraintsList.push({
+                "@type": "LogicalConstraint",
+                "and": [
+                  purposeConstraint,
+                  ...purposeConstraintsProhib
+                ]
+              });
+            } else {
+              // Otherwise, just use the simple purpose constraint block
+              prohibConstraintsList.push(purposeConstraint);
+            }
+          } 
+		  
+		  if (globalConstraintsProhib) {
+            // If no purpose but global constraints exist
+            prohibConstraintsList = prohibConstraintsList.concat(globalConstraintsProhib);
+          }
+
+          if (prohibConstraintsList.length > 0) {
+            prObj.constraint = prohibConstraintsList;
+          }
+
+          return prObj;
+        });
+      }
+
+      setJsonLd(JSON.stringify(doc, null, 2));
+    } catch (e) {
+      console.error("Failed to compile JSON-LD:", e);
     }
-
-    const doc = {
-      "@context": "http://www.w3.org/ns/odrl/2/",
-      "@type": policy.type,
-      "uid": policy.uid || undefined,
-      "profile": policy.profile || undefined,
-      ...(policy.assigner && { "assigner": policy.assigner }),
-      ...(policy.assignee && { "assignee": policy.assignee }),
-      ...(policy.conflict && { "conflict": policy.conflict.startsWith('odrl:') ? policy.conflict : `odrl:${policy.conflict}` }),
-      ...(targetOutput && { "target": targetOutput }),
-      ...(compiledPermissions.length > 0 && {
-        "permission": compiledPermissions.length === 1 ? compiledPermissions[0] : compiledPermissions
-      })
-    };
-    
-    setJsonLd(JSON.stringify(doc, null, 2));
   }, [policy]);
 
-  // Server publishing pipeline execution
-  const handlePublish = async () => {
-    const policyName = prompt("Please enter a name for this policy file:", "my_custom_policy");
-    if (policyName === null) return;
-    const sanitizedName = policyName.trim();
-    if (!sanitizedName) {
-      setBackendStatus("Publish aborted: Filename cannot be empty.");
-      alert("Error: Policy file name cannot be empty.");
-      return;
-    }
-
+  // Handler to load server policy file into editor
+  const handleLoadServerPolicy = async (filename) => {
     try {
-      setBackendStatus('Writing file ledger...');
-      const compiledJsonData = JSON.parse(jsonLd);
-
-      const response = await fetch('http://127.0.0.1:8005/api/policy/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: sanitizedName,
-          policy_data: compiledJsonData
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (response.ok && data.status !== "error") {
-        setBackendStatus(data.message || "Policy successfully published.");
-        alert(`Success! ${data.message || "The document was saved to the server directory."}`);
-        fetchServerFiles(); 
-      } else {
-        const errorMsg = data.message || data.detail || "Server failed to process file compilation.";
-        setBackendStatus(`Error: ${errorMsg}`);
-        alert(`Failed to save policy: ${errorMsg}`);
+      const res = await fetch(`api/policies/${filename}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPolicy({
+          type: data["@type"] || 'Agreement',
+          uid: data["@id"] || data.uid || '',
+          profile: data.profile || '',
+          assigner: data.assigner || null,
+          assignee: data.assignee || null,
+          conflict: data.conflict || null,
+          targets: data.target ? (Array.isArray(data.target) ? data.target : [data.target]) : [],
+          permissions: data.permission ? (Array.isArray(data.permission) ? data.permission : [data.permission]) : [],
+          prohibitions: data.prohibition ? (Array.isArray(data.prohibition) ? data.prohibition : [data.prohibition]) : []
+        });
+        setShowDropdown(false);
+        setBackendStatus(`Loaded policy: ${filename}`);
       }
     } catch (err) {
-      const errorMsg = "Error connecting to Python backend server framework.";
-      setBackendStatus(errorMsg);
-      alert(errorMsg);
+      console.error("Failed to load server policy file:", err);
+      setBackendStatus(`Error loading policy: ${filename}`);
     }
   };
 
-  // SHACL structural validation check
-  const handleValidateShacl = async () => {
+  // Publish policy handler
+  const handlePublish = async () => {
     try {
-      setShaclResult({ loading: true, message: 'Validating against SHACL shapes...' });
-      const response = await fetch('http://127.0.0.1:8005/api/policy/validate', {
+      setBackendStatus('Publishing policy...');
+      const res = await fetch('api/policies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ json_string: jsonLd })
+        body: jsonLd
       });
-      const data = await response.json();
-      setShaclResult({ loading: false, valid: data.valid, message: data.message, report: data.report });
+      if (res.ok) {
+        setBackendStatus('Policy published successfully.');
+        fetchServerFiles();
+      } else {
+        setBackendStatus('Failed to publish policy.');
+      }
     } catch (err) {
-      setShaclResult({ loading: false, valid: false, message: 'Network verification structural failure.', report: err.message });
+      console.error("Publish network error:", err);
+      setBackendStatus('Network error during publishing.');
+    }
+  };
+
+  // Validate SHACL report handler
+  const handleValidateShacl = async () => {
+    setShaclResult({ loading: true, message: 'Validating against SHACL shapes...' });
+    try {
+      const res = await fetch('api/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: jsonLd
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setShaclResult({
+          loading: false,
+          valid: result.conforms,
+          message: result.conforms ? 'Policy conforms to SHACL rules.' : 'SHACL validation violations found.',
+          report: result.report || ''
+        });
+      } else {
+        setShaclResult({ loading: false, valid: false, message: 'Validation service error.' });
+      }
+    } catch (err) {
+      console.error("SHACL validation failed:", err);
+      setShaclResult({ loading: false, valid: false, message: 'Could not connect to SHACL validator.' });
     }
   };
 
   return {
-    activePermissionIdx,
-    setActivePermissionIdx,
-    showVocabModal,
-    setShowVocabModal,
-    vocabOutput,
-    setVocabOutput,
-    policy,
-    setPolicy,
-    jsonLd,
-    backendStatus,
-    setBackendStatus,
-    shaclResult,
-    showShaclReport,
-    setShowShaclReport,
-    serverFiles,
-    showDropdown,
-    setShowDropdown,
-    dbActions,
-    dbPurposes,
-    dbLeftOperands,
-    dbOperators,
-    dbRightOperands,
-    fetchServerFiles,
-    handleLoadServerPolicy,
-    handlePublish,
-    handleValidateShacl
+    activePermissionIdx, setActivePermissionIdx,
+    showVocabModal, setShowVocabModal,
+    vocabOutput, setVocabOutput,
+    policy, setPolicy,
+    jsonLd, backendStatus,
+    shaclResult, showShaclReport, setShowShaclReport,
+    serverFiles, showDropdown, setShowDropdown,
+    dbActions, dbPurposes, dbLeftOperands, dbOperators, dbRightOperands,
+    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl
   };
 }
