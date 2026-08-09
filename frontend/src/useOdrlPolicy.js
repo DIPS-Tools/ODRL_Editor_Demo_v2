@@ -33,7 +33,8 @@ export function useOdrlPolicy() {
     conflict: null,
     targets: [],
     permissions: [],
-    prohibitions: []
+    prohibitions: [],
+	obligations: []
   });
 
   const [jsonLd, setJsonLd] = useState('');
@@ -103,10 +104,23 @@ export function useOdrlPolicy() {
   // Compile policy state into JSON-LD whenever policy data changes
   useEffect(() => {
     try {
-      const doc = {
+      //const doc = {
+      //  "@context": {
+      //    "@vocab": "http://www.w3.org/ns/odrl/2/",
+      //    "odrl": "http://www.w3.org/ns/odrl/2/"
+      //  },
+      //  "@type": policy.type || "Set",
+      //  "@id": policy.uid || "urn:policy:unidentified"
+      //};
+	  
+	  const doc = {
         "@context": {
-          "@vocab": "http://www.w3.org/ns/odrl/2/",
-          "odrl": "http://www.w3.org/ns/odrl/2/"
+			"@vocab": "http://www.w3.org/ns/odrl.jsonld",
+          "odrl": "http://www.w3.org/ns/odrl.jsonld",
+         
+            "dcat": "http://www.w3.org/ns/dcat#",
+            "dpv": "https://w3id.org/dpv/dpv-owl#"
+         
         },
         "@type": policy.type || "Set",
         "@id": policy.uid || "urn:policy:unidentified"
@@ -349,12 +363,12 @@ export function useOdrlPolicy() {
 		  if (prohib.target?.name) {
             const targetConstraints = buildConstraintsObj(prohib.target.constraints);
             if (targetConstraints) {
-              prohib.target = {
+              prObj.target = {
                 "source": prohib.target.name,
                 "refinement": targetConstraints
               };
             } else {
-              prohib.target = prohib.target.name;
+              prObj.target = prohib.target.name;
             }
           }
 
@@ -451,6 +465,94 @@ export function useOdrlPolicy() {
           return prObj;
         });
       }
+	  
+	  // Serialize Obligations
+      if (policy.obligations && policy.obligations.length > 0) {
+        doc.obligation = policy.obligations.map(obl => {
+          const obObj = {};
+
+          if (obl.action?.name) {
+            if (obl.action.constraints && obl.action.constraints.length > 0) {
+              obObj.action = {
+                "@id": obl.action.name,
+                "refinement": buildConstraintsObj(obl.action.constraints)
+              };
+            } else {
+              obObj.action = obl.action.name;
+            }
+          }
+
+          if (obl.target?.name) {
+            const targetConstraints = buildConstraintsObj(obl.target.constraints);
+            if (targetConstraints) {
+              obObj.target = {
+                "source": obl.target.name,
+                "refinement": targetConstraints
+              };
+            } else {
+              obObj.target = obl.target.name;
+            }
+          }
+
+          if (obl.assigner) {
+            const constraintsObj = buildConstraintsObj(obl.assigner.constraints);
+            if (constraintsObj) {
+              obObj.assigner = {
+                "@type": obl.assigner.type,
+                "constraint": constraintsObj
+              };
+            } else {
+              obObj.assigner = obl.assigner.type;
+            }
+          }
+
+          if (obl.actor) {
+            const constraintsObj = buildConstraintsObj(obl.actor.constraints);
+            if (constraintsObj) {
+              obObj.assignee = {
+                "@type": obl.actor.type,
+                "constraint": constraintsObj
+              };
+            } else {
+              obObj.assignee = obl.actor.type;
+            }
+          }
+
+          let constraintsList = [];
+          const globalConstraints = buildConstraintsObj(obl.constraints);
+
+          if (obl.purpose?.name) {
+            const purposeConstraint = {
+              "@type": "Constraint",
+              "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
+              "operator": "eq",
+              "rightOperand": obl.purpose.name
+            };
+            const purposeConstraints = buildConstraintsObj(obl.purpose.constraints);
+            if (purposeConstraints && purposeConstraints.length > 0) {
+              constraintsList.push({
+                "@type": "LogicalConstraint",
+                "and": [
+                  purposeConstraint,
+                  ...purposeConstraints
+                ]
+              });
+            } else {
+              constraintsList.push(purposeConstraint);
+            }
+          }
+
+          if (globalConstraints) {
+            constraintsList = constraintsList.concat(globalConstraints);
+          }
+
+          if (constraintsList.length > 0) {
+            obObj.constraint = constraintsList;
+          }
+      
+          return obObj;
+        });
+      }
 
       setJsonLd(JSON.stringify(doc, null, 2));
     } catch (e) {
@@ -473,7 +575,8 @@ export function useOdrlPolicy() {
           conflict: data.conflict || null,
           targets: data.target ? (Array.isArray(data.target) ? data.target : [data.target]) : [],
           permissions: data.permission ? (Array.isArray(data.permission) ? data.permission : [data.permission]) : [],
-          prohibitions: data.prohibition ? (Array.isArray(data.prohibition) ? data.prohibition : [data.prohibition]) : []
+          prohibitions: data.prohibition ? (Array.isArray(data.prohibition) ? data.prohibition : [data.prohibition]) : [],
+		  obligations: data.obligation ? (Array.isArray(data.obligation) ? data.obligation : [data.obligation]) : []
         });
         setShowDropdown(false);
         setBackendStatus(`Loaded policy: ${filename}`);
@@ -518,8 +621,10 @@ export function useOdrlPolicy() {
         const result = await res.json();
         setShaclResult({
           loading: false,
-          valid: result.conforms,
-          message: result.conforms ? 'Policy conforms to SHACL rules.' : 'SHACL validation violations found.',
+          //valid: result.conforms,
+          // message: result.conforms ? 'Policy conforms to SHACL rules.' : 'SHACL validation violations found.',
+		  valid: result.valid, // Fixed: changed from result.conforms to result.valid
+          message: result.message || (result.valid ? 'Policy conforms to SHACL rules.' : 'SHACL validation violations found.'), // Uses backend message directly
           report: result.report || ''
         });
       } else {

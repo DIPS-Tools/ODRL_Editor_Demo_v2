@@ -18,192 +18,58 @@ export default function OdrlEditor() {
 
   // State for feature under development modal
   const [showDevModal, setShowDevModal] = useState(false);
+  
+  // State for magnifying glass floating modal
+  const [showMagnifyModal, setShowMagnifyModal] = useState(false);
 
   // State for toggling policy code format view (JSON-LD vs TTL)
   const [codeViewFormat, setCodeViewFormat] = useState('JSON-LD');
+  
+  // State to hold the TTL string fetched from the backend endpoint
+  const [ttlOutput, setTtlOutput] = useState('');
 
   // Ref for hidden file input used in uploading a local policy file
   const fileInputRef = useRef(null);
 
-  // Helper function to fully convert JSON-LD policy object into valid Turtle (TTL) syntax
-  const convertJsonLdToTtl = (jsonLdString) => {
+  // Asynchronous helper function to call the api/policy/to-ttl endpoint
+  const convertJsonLdToTtl = async (jsonLdString) => {
     try {
-      const data = JSON.parse(jsonLdString);
-      let ttl = `@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n`;
-      ttl += `@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n`;
-      ttl += `@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n`;
-      ttl += `@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\n`;
-
-      const policyId = data["@id"] || data.uid || "_:policy";
-      const policyType = data["@type"] || "odrl:Set";
-
-      ttl += `<${policyId}>\n`;
-      ttl += `  a ${policyType.startsWith('odrl:') ? policyType : `odrl:${policyType}`} ;\n`;
-
-      if (data.profile) {
-        ttl += `  odrl:profile <${data.profile}> ;\n`;
-      }
-      if (data.conflict) {
-        ttl += `  odrl:conflict odrl:${data.conflict} ;\n`;
-      }
-      if (data.assigner) {
-        ttl += `  odrl:assigner <${data.assigner}> ;\n`;
-      }
-      if (data.assignee) {
-        ttl += `  odrl:assignee <${data.assignee}> ;\n`;
-      }
-
-      // Handle global targets
-      const targets = data.target ? (Array.isArray(data.target) ? data.target : [data.target]) : [];
-      targets.forEach(t => {
-        const tId = typeof t === 'string' ? t : (t["@id"] || '');
-        if (tId) {
-          ttl += `  odrl:target <${tId}> ;\n`;
-        }
+      const response = await fetch('api/policy/to-ttl', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonLdString, // Pass the JSON-LD string directly (or JSON.stringify({ policy: jsonLdString }) if your backend expects a JSON object wrapper)
       });
 
-      // Handle permissions recursively
-      const permissions = data.permission ? (Array.isArray(data.permission) ? data.permission : [data.permission]) : [];
-      permissions.forEach((perm) => {
-        ttl += `  odrl:permission [\n`;
-        
-        // Action
-        if (perm.action) {
-          const actionVal = typeof perm.action === 'string' ? perm.action : (perm.action.rdfValue || perm.action["@id"] || '');
-          ttl += `    odrl:action <${actionVal}> ;\n`;
-          if (perm.action.refinement && perm.action.refinement.length > 0) {
-            perm.action.refinement.forEach(ref => {
-              ttl += `    odrl:refinement [\n`;
-              ttl += `      odrl:leftOperand <${ref.leftOperand}> ;\n`;
-              ttl += `      odrl:operator odrl:${ref.operator === '=' ? 'eq' : ref.operator} ;\n`;
-              ttl += `      odrl:rightOperand "${ref.rightOperand}"\n`;
-              ttl += `    ] ;\n`;
-            });
-          }
-        }
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}: ${response.statusText}`);
+      }
 
-        // Target inside permission
-        if (perm.target) {
-          const pTarget = typeof perm.target === 'string' ? perm.target : (perm.target["@id"] || '');
-          if (pTarget) {
-            ttl += `    odrl:target <${pTarget}> ;\n`;
-          }
-        }
+      // Assuming the endpoint returns the raw TTL string. 
+      // Use response.json() if your API returns an object like { ttl: "..." }
+      // Parse the response as JSON
+      const data = await response.json();
 
-        // Parties inside permission
-        if (perm.assigner) {
-          const assignerVal = typeof perm.assigner === 'string' ? perm.assigner : perm.assigner["@id"];
-          ttl += `    odrl:assigner <${assignerVal}> ;\n`;
-        }
-        if (perm.assignee) {
-          const assigneeVal = typeof perm.assignee === 'string' ? perm.assignee : perm.assignee["@id"];
-          ttl += `    odrl:assignee <${assigneeVal}> ;\n`;
-        }
-
-        // Rule-level constraints
-        if (perm.constraint) {
-          const constraints = Array.isArray(perm.constraint) ? perm.constraint : [perm.constraint];
-          constraints.forEach(c => {
-            ttl += `    odrl:constraint [\n`;
-            ttl += `      odrl:leftOperand <${c.leftOperand}> ;\n`;
-            ttl += `      odrl:operator odrl:${c.operator === '=' ? 'eq' : c.operator} ;\n`;
-            ttl += `      odrl:rightOperand "${c.rightOperand}"\n`;
-            ttl += `    ] ;\n`;
-          });
-        }
-
-        // Duties inside permission
-        if (perm.duty) {
-          const duties = Array.isArray(perm.duty) ? perm.duty : [perm.duty];
-          duties.forEach(duty => {
-            ttl += `    odrl:duty [\n`;
-            if (duty.action) {
-              const dAction = typeof duty.action === 'string' ? duty.action : (duty.action.rdfValue || duty.action["@id"] || '');
-              ttl += `      odrl:action <${dAction}> ;\n`;
-            }
-            if (duty.consequence) {
-              const consequences = Array.isArray(duty.consequence) ? duty.consequence : [duty.consequence];
-              consequences.forEach(cons => {
-                ttl += `      odrl:consequence [\n`;
-                if (cons.action) {
-                  const cAction = typeof cons.action === 'string' ? cons.action : (cons.action.rdfValue || cons.action["@id"] || '');
-                  ttl += `        odrl:action <${cAction}> ;\n`;
-                }
-                ttl += `      ] ;\n`;
-              });
-            }
-            ttl += `    ] ;\n`;
-          });
-        }
-
-        ttl += `  ] ;\n`;
-      });
-
-      // Handle prohibitions recursively
-      const prohibitions = data.prohibition ? (Array.isArray(data.prohibition) ? data.prohibition : [data.prohibition]) : [];
-      prohibitions.forEach((prohib) => {
-        ttl += `  odrl:prohibition [\n`;
-        
-        // Action
-        if (prohib.action) {
-          const actionVal = typeof prohib.action === 'string' ? prohib.action : (prohib.action.rdfValue || prohib.action["@id"] || '');
-          ttl += `    odrl:action <${actionVal}> ;\n`;
-          if (prohib.action.refinement && prohib.action.refinement.length > 0) {
-            prohib.action.refinement.forEach(ref => {
-              ttl += `    odrl:refinement [\n`;
-              ttl += `      odrl:leftOperand <${ref.leftOperand}> ;\n`;
-              ttl += `      odrl:operator odrl:${ref.operator === '=' ? 'eq' : ref.operator} ;\n`;
-              ttl += `      odrl:rightOperand "${ref.rightOperand}"\n`;
-              ttl += `    ] ;\n`;
-            });
-          }
-        }
-
-        // Target inside prohibition
-        if (prohib.target) {
-          const pTarget = typeof prohib.target === 'string' ? prohib.target : (prohib.target["@id"] || '');
-          if (pTarget) {
-            ttl += `    odrl:target <${pTarget}> ;\n`;
-          }
-        }
-
-        // Parties inside prohibition
-        if (prohib.assigner) {
-          const assignerVal = typeof prohib.assigner === 'string' ? prohib.assigner : prohib.assigner["@id"];
-          ttl += `    odrl:assigner <${assignerVal}> ;\n`;
-        }
-        if (prohib.assignee) {
-          const assigneeVal = typeof prohib.assignee === 'string' ? prohib.assignee : prohib.assignee["@id"];
-          ttl += `    odrl:assignee <${assigneeVal}> ;\n`;
-        }
-
-        // Rule-level constraints
-        if (prohib.constraint) {
-          const constraints = Array.isArray(prohib.constraint) ? prohib.constraint : [prohib.constraint];
-          constraints.forEach(c => {
-            ttl += `    odrl:constraint [\n`;
-            ttl += `      odrl:leftOperand <${c.leftOperand}> ;\n`;
-            ttl += `      odrl:operator odrl:${c.operator === '=' ? 'eq' : c.operator} ;\n`;
-            ttl += `      odrl:rightOperand "${c.rightOperand}"\n`;
-            ttl += `    ] ;\n`;
-          });
-        }
-
-        ttl += `  ] ;\n`;
-      });
-
-      // Clean trailing punctuation
-      if (ttl.endsWith(';\n')) {
-        ttl = ttl.slice(0, -2) + ' .\n';
+      // Return just the "ttl" content if it exists, otherwise throw an error
+      if (data && data.ttl) {
+        return data.ttl;
       } else {
-        ttl += '.\n';
+        throw new Error('Response object did not contain a "ttl" property.');
       }
-
-      return ttl;
     } catch (e) {
-      return `# Error parsing JSON-LD for TTL conversion: ${e.message}\n\n` + jsonLdString;
+      return `# Error parsing JSON-LD for TTL conversion via API: ${e.message}\n\n` + jsonLdString;
     }
   };
+  
+  // Automatically fetch TTL when JSON-LD updates or when TTL view format is selected
+  React.useEffect(() => {
+    if (codeViewFormat === 'TTL' && jsonLd) {
+      convertJsonLdToTtl(jsonLd).then((result) => {
+        setTtlOutput(result);
+      });
+    }
+  }, [jsonLd, codeViewFormat]);
 
   // Handler for downloading the current policy as a .json file
   const handleDownloadPolicy = () => {
@@ -272,6 +138,20 @@ export default function OdrlEditor() {
             target: p.target ? { name: typeof p.target === 'string' ? p.target : (p.target?.["@id"] || ''), constraints: [] } : null,
             constraints: p.constraint ? (Array.isArray(p.constraint) ? p.constraint : [p.constraint]).map(c => ({ leftOperand: c.leftOperand, operator: c.operator, rightOperand: c.rightOperand })) : []
           }));
+		  
+		  const newObligations = (parsedJson.obligation ? (Array.isArray(parsedJson.obligation) ? parsedJson.obligation : [parsedJson.obligation]) : []).map(p => ({
+            action: { name: typeof p.action === 'string' ? p.action : (p.action?.rdfValue || p.action?.["@id"] || ''), constraints: [] },
+            assigner: p.assigner ? { type: 'Legal Entity', constraints: [] } : null,
+            actor: p.assignee ? { type: 'Legal Entity', constraints: [] } : null,
+            purpose: p.purpose ? {
+              name: typeof p.purpose === 'string' ? p.purpose : (p.purpose?.["@id"] || p.purpose?.rdfValue || ''),
+              constraints: (p.purpose.constraint || p.purpose.refinement) ? 
+                (Array.isArray(p.purpose.constraint || p.purpose.refinement) ? (p.purpose.constraint || p.purpose.refinement) : [p.purpose.constraint || p.purpose.refinement]).map(c => ({ leftOperand: c.leftOperand, operator: c.operator, rightOperand: c.rightOperand })) 
+                : []
+            } : null,
+            target: p.target ? { name: typeof p.target === 'string' ? p.target : (p.target?.["@id"] || ''), constraints: [] } : null,
+            constraints: p.constraint ? (Array.isArray(p.constraint) ? p.constraint : [p.constraint]).map(c => ({ leftOperand: c.leftOperand, operator: c.operator, rightOperand: c.rightOperand })) : []
+          }));
 
           setPolicy({
             type: parsedJson["@type"] || 'Set',
@@ -282,7 +162,8 @@ export default function OdrlEditor() {
             conflict: parsedJson.conflict || null,
             targets: newTargets,
             permissions: newPermissions,
-            prohibitions: newProhibitions
+            prohibitions: newProhibitions,
+			obligations: newObligations
           });
           setActivePermissionIdx({ type: 'permission', idx: 0 });
         }
@@ -674,8 +555,145 @@ export default function OdrlEditor() {
   const activeProhibition = activePermissionIdx.type === 'prohibition' 
     ? (policy.prohibitions && policy.prohibitions[activePermissionIdx.idx]) 
     : null;
+	
+  const activeObligation = activePermissionIdx.type === 'obligation' 
+    ? (policy.obligations && policy.obligations[activePermissionIdx.idx]) 
+    : null;
 
   const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+  
+  // ADDING OBLIGATION ELEMENTS HERE [TIDY IN FUTURE]
+  
+  // Obligation Block Handlers
+  const addObligationBlock = () => {
+    const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+    const newObligation = {
+      action: { name: '', constraints: [] },
+      assigner: null, actor: null,
+      purpose: null,
+      target: hasGlobalTargets ? null : { name: '', constraints: [] },
+      constraints: []
+    };
+    const obligations = [...(policy.obligations || []), newObligation];
+    setPolicy({ ...policy, obligations });
+    setActivePermissionIdx({ type: 'obligation', idx: obligations.length - 1 });
+  };
+
+  const removeObligationBlock = (oblIdx) => {
+    const obligations = policy.obligations.filter((_, idx) => idx !== oblIdx);
+    setPolicy({ ...policy, obligations });
+    if (activePermissionIdx.type === 'obligation' && activePermissionIdx.idx >= obligations.length) {
+      if (obligations.length > 0) {
+        setActivePermissionIdx({ type: 'obligation', idx: obligations.length - 1 });
+      } else if (policy.prohibitions && policy.prohibitions.length > 0) {
+        setActivePermissionIdx({ type: 'prohibition', idx: policy.prohibitions.length - 1 });
+      } else if (policy.permissions && policy.permissions.length > 0) {
+        setActivePermissionIdx({ type: 'permission', idx: policy.permissions.length - 1 });
+      }
+    }
+  };
+
+  const modifyObligations = (updaterFn) => {
+    const obligations = [...(policy.obligations || [])];
+    updaterFn(obligations);
+    setPolicy({ ...policy, obligations });
+  };
+
+  // Specific Obligation Constraint & Sub-block Handlers
+  const addObligationActionConstraint = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].action.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
+  });
+  const updateObligationActionConstraint = (oblIdx, index, field, value) => modifyObligations(obligations => {
+    obligations[oblIdx].action.constraints[index][field] = value;
+  });
+  const deleteObligationActionConstraint = (oblIdx, indexToRemove) => modifyObligations(obligations => {
+    obligations[oblIdx].action.constraints = obligations[oblIdx].action.constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addObligationConstraint = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
+  });
+  const updateObligationConstraint = (oblIdx, index, field, value) => modifyObligations(obligations => {
+    obligations[oblIdx].constraints[index][field] = value;
+  });
+  const deleteObligationConstraint = (oblIdx, indexToRemove) => modifyObligations(obligations => {
+    obligations[oblIdx].constraints = obligations[oblIdx].constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addObligationAssignerConstraint = (oblIdx) => modifyObligations(obligations => {
+    if (!obligations[oblIdx].assigner) return;
+    obligations[oblIdx].assigner.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+  });
+  const updateObligationAssignerConstraint = (oblIdx, index, field, value) => modifyObligations(obligations => {
+    obligations[oblIdx].assigner.constraints[index][field] = value;
+  });
+  const deleteObligationAssignerConstraint = (oblIdx, indexToRemove) => modifyObligations(obligations => {
+    obligations[oblIdx].assigner.constraints = obligations[oblIdx].assigner.constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addObligationActorConstraint = (oblIdx) => modifyObligations(obligations => {
+    if (!obligations[oblIdx].actor) return;
+    obligations[oblIdx].actor.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+    });
+  const updateObligationActorConstraint = (oblIdx, index, field, value) => modifyObligations(obligations => {
+    obligations[oblIdx].actor.constraints[index][field] = value;
+  });
+  const deleteObligationActorConstraint = (oblIdx, indexToRemove) => modifyObligations(obligations => {
+    obligations[oblIdx].actor.constraints = obligations[oblIdx].actor.constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addObligationPurposeConstraint = (oblIdx) => modifyObligations(obligations => {
+    if (!obligations[oblIdx].purpose) return;
+    obligations[oblIdx].purpose.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+  });
+  const updateObligationPurposeConstraint = (oblIdx, index, field, value) => modifyObligations(obligations => {
+    obligations[oblIdx].purpose.constraints[index][field] = value;
+  });
+  const deleteObligationPurposeConstraint = (oblIdx, indexToRemove) => modifyObligations(obligations => {
+    obligations[oblIdx].purpose.constraints = obligations[oblIdx].purpose.constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addObligationTargetConstraint = (oblIdx) => modifyObligations(obligations => {
+    if (!obligations[oblIdx].target) return;
+    obligations[oblIdx].target.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+  });
+  const updateObligationTargetConstraint = (oblIdx, index, field, value) => modifyObligations(obligations => {
+    obligations[oblIdx].target.constraints[index][field] = value;
+  });
+  const deleteObligationTargetConstraint = (oblIdx, indexToRemove) => modifyObligations(obligations => {
+    obligations[oblIdx].target.constraints = obligations[oblIdx].target.constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addObligationAssignerBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].assigner = { type: 'Legal Entity', constraints: [] };
+  });
+  const removeObligationAssignerBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].assigner = null;
+  });
+
+  const addObligationActorBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].actor = { type: 'Legal Entity', constraints: [] };
+  });
+  const removeObligationActorBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].actor = null;
+  });
+
+  const addObligationPurposeBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].purpose = { name: '', constraints: [] };
+  });
+  const removeObligationPurposeBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].purpose = null;
+  });
+
+  const addObligationTargetBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].target = { name: '', constraints: [] };
+  });
+  const removeObligationTargetBlock = (oblIdx) => modifyObligations(obligations => {
+    obligations[oblIdx].target = null;
+  });
+  
+  
+  // END ADDING OBLIGATION ELEMENTS HERE
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 font-sans text-sm text-slate-800 relative w-full min-w-[1280px]">
@@ -1475,7 +1493,218 @@ export default function OdrlEditor() {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : activeObligation ? (
+              <div className="border border-slate-300 rounded-lg p-4 bg-slate-50 flex flex-col gap-4 relative">
+                  <button onClick={() => removeObligationBlock(activePermissionIdx.idx)} title="Delete this obligation rule completely" className="absolute top-2 right-2 text-rose-500 hover:text-white hover:bg-rose-500 border border-transparent hover:border-rose-600 font-bold text-xs w-6 h-6 flex items-center justify-center rounded transition-all cursor-pointer shadow-xs z-10">✕</button>
+
+                  <div className="flex justify-between items-start border-b pb-2 gap-4">
+                    <div className="flex flex-col gap-1.5 flex-1 pr-6">
+                      <span className="font-bold text-amber-700">🛡️ EDITING: OBLIGATION #{activePermissionIdx.idx + 1}</span>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => addObligationConstraint(activePermissionIdx.idx)} className="text-xs bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 font-medium">+ Add Rule Constraint</button>
+                        {!activeObligation.assigner && <button onClick={() => addObligationAssignerBlock(activePermissionIdx.idx)} className="text-xs bg-slate-600 text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assigner</button>}
+                        {!activeObligation.actor && <button onClick={() => addObligationActorBlock(activePermissionIdx.idx)} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assignee</button>}
+                        {!activeObligation.purpose && <button onClick={() => addObligationPurposeBlock(activePermissionIdx.idx)} className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Purpose</button>}
+                        {hasGlobalTargets && !activeObligation.target && <button onClick={() => addObligationTargetBlock(activePermissionIdx.idx)} className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Target</button>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Block */}
+                  <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold uppercase text-amber-600">Action</label>
+                      <button onClick={() => addObligationActionConstraint(activePermissionIdx.idx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium">+ Add Action Refinement</button>
+                    </div>
+
+                    <select className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" value={activeObligation.action?.name || ''} onChange={(e) => {
+                      const obligations = [...policy.obligations];
+                      obligations[activePermissionIdx.idx].action.name = e.target.value;
+                      setPolicy({...policy, obligations});
+                    }}>
+                      <option value="">-- Select Action --</option>
+                      {dbActions.map(([path, uri, definition]) => (
+                        <option key={uri} value={uri} title={definition}>{path}</option>
+                      ))}
+                    </select>
+
+                    {activeObligation.action?.constraints?.length > 0 && (
+                      <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
+                        {activeObligation.action.constraints.map((constraint, idx) => (
+                          <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                            <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
+                            {renderLeftOperandSelect(constraint.leftOperand, (e) => updateObligationActionConstraint(activePermissionIdx.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                            {renderOperatorSelect(constraint.operator, (e) => updateObligationActionConstraint(activePermissionIdx.idx, idx, 'operator', e.target.value), dbOperators)}
+                            {renderRightOperandInput(constraint.rightOperand, (e) => updateObligationActionConstraint(activePermissionIdx.idx, idx, 'rightOperand', e.target.value))}
+                            <button type="button" onClick={() => deleteObligationActionConstraint(activePermissionIdx.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                 </div>
+
+                  {/* Assigner Block */}
+                  {activeObligation.assigner && (
+                    <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold uppercase text-slate-600">Assigner</label>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => addObligationAssignerConstraint(activePermissionIdx.idx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Assigner Constraint</button>
+                          <button type="button" onClick={() => removeObligationAssignerBlock(activePermissionIdx.idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
+                        </div>
+                      </div>
+                      <select className="w-full border p-1.5 rounded text-xs bg-white font-medium" value={activeObligation.assigner.type} onChange={(e) => {
+                        const obligations = [...policy.obligations];
+                        obligations[activePermissionIdx.idx].assigner.type = e.target.value;
+                        setPolicy({...policy, obligations});
+                      }}>
+                        <option value="Legal Entity">Legal Entity</option>
+                        <option value="Natural Person">Natural Person</option>
+                        <option value="Organisational Unit">Organisational Unit</option>
+                      </select>
+
+                      {activeObligation.assigner.constraints?.length > 0 && (
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
+                          {activeObligation.assigner.constraints.map((constraint, idx) => (
+                            <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                              <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
+                              {renderLeftOperandSelect(constraint.leftOperand, (e) => updateObligationAssignerConstraint(activePermissionIdx.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                              {renderOperatorSelect(constraint.operator, (e) => updateObligationAssignerConstraint(activePermissionIdx.idx, idx, 'operator', e.target.value), dbOperators)}
+                              {renderRightOperandInput(constraint.rightOperand, (e) => updateObligationAssignerConstraint(activePermissionIdx.idx, idx, 'rightOperand', e.target.value))}
+                              <button type="button" onClick={() => deleteObligationAssignerConstraint(activePermissionIdx.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actor / Assignee Block */}
+                  {activeObligation.actor && (
+                    <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold uppercase text-indigo-600">Assignee</label>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => addObligationActorConstraint(activePermissionIdx.idx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Assignee Constraint</button>
+                          <button type="button" onClick={() => removeObligationActorBlock(activePermissionIdx.idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
+                        </div>
+                      </div>
+                      <select className="w-full border p-1.5 rounded text-xs bg-white font-medium" value={activeObligation.actor.type} onChange={(e) => {
+                        const obligations = [...policy.obligations];
+                        obligations[activePermissionIdx.idx].actor.type = e.target.value;
+                        setPolicy({...policy, obligations});
+                      }}>
+                        <option value="Legal Entity">Legal Entity</option>
+                        <option value="Natural Person">Natural Person</option>
+                        <option value="Organisational Unit">Organisational Unit</option>
+                      </select>
+
+                      {activeObligation.actor.constraints?.length > 0 && (
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-indigo-400 mt-1 w-full min-w-0">
+                          {activeObligation.actor.constraints.map((constraint, idx) => (
+                            <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                              <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
+                              {renderLeftOperandSelect(constraint.leftOperand, (e) => updateObligationActorConstraint(activePermissionIdx.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                              {renderOperatorSelect(constraint.operator, (e) => updateObligationActorConstraint(activePermissionIdx.idx, idx, 'operator', e.target.value), dbOperators)}
+                              {renderRightOperandInput(constraint.rightOperand, (e) => updateObligationActorConstraint(activePermissionIdx.idx, idx, 'rightOperand', e.target.value))}
+                              <button type="button" onClick={() => deleteObligationActorConstraint(activePermissionIdx.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Purpose Block */}
+                  {activeObligation.purpose && (
+                    <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold uppercase text-purple-600">Purpose</label>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => addObligationPurposeConstraint(activePermissionIdx.idx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Refinement</button>
+                          <button type="button" onClick={() => removeObligationPurposeBlock(activePermissionIdx.idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
+                        </div>
+                      </div>
+
+                      <select className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" value={activeObligation.purpose?.name || ''} onChange={(e) => {
+                        const obligations = [...policy.obligations];
+                        obligations[activePermissionIdx.idx].purpose.name = e.target.value;
+                        setPolicy({...policy, obligations});
+                      }}>
+                        <option value="">-- Select Purpose --</option>
+                        {(dbPurposes || []).map(([path, uri, definition]) => (
+                          <option key={uri} value={uri} title={definition}>{path}</option>
+                        ))}
+                      </select>
+
+                      {activeObligation.purpose?.constraints?.length > 0 && (
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-purple-400 mt-1 w-full min-w-0">
+                          {activeObligation.purpose.constraints.map((constraint, idx) => (
+                            <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                              <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
+                              {renderLeftOperandSelect(constraint.leftOperand, (e) => updateObligationPurposeConstraint(activePermissionIdx.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                              {renderOperatorSelect(constraint.operator, (e) => updateObligationPurposeConstraint(activePermissionIdx.idx, idx, 'operator', e.target.value), dbOperators)}
+                              {renderRightOperandInput(constraint.rightOperand, (e) => updateObligationPurposeConstraint(activePermissionIdx.idx, idx, 'rightOperand', e.target.value))}
+                              <button type="button" onClick={() => deleteObligationPurposeConstraint(activePermissionIdx.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Target Asset Block */}
+                  {activeObligation.target && (
+                    <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold uppercase text-emerald-600">Target Asset</label>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => addObligationTargetConstraint(activePermissionIdx.idx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Target Constraint</button>
+                          {hasGlobalTargets && (
+                            <button type="button" onClick={() => removeObligationTargetBlock(activePermissionIdx.idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
+                          )}
+                        </div>
+                      </div>
+                      <input type="text" placeholder="Target name or URI" className="w-full border p-1.5 rounded text-xs bg-white font-mono" value={activeObligation.target?.name || ''} onChange={(e) => {
+                        const obligations = [...policy.obligations];
+                        if (!obligations[activePermissionIdx.idx].target) obligations[activePermissionIdx.idx].target = { name: '', constraints: [] };
+                        obligations[activePermissionIdx.idx].target.name = e.target.value;
+                        setPolicy({...policy, obligations});
+                      }}/>
+
+                      {activeObligation.target?.constraints?.length > 0 && (
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-emerald-400 mt-1 w-full min-w-0">
+                          {activeObligation.target.constraints.map((constraint, idx) => (
+                            <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                              <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
+                              {renderLeftOperandSelect(constraint.leftOperand, (e) => updateObligationTargetConstraint(activePermissionIdx.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                              {renderOperatorSelect(constraint.operator, (e) => updateObligationTargetConstraint(activePermissionIdx.idx, idx, 'operator', e.target.value), dbOperators)}
+                              {renderRightOperandInput(constraint.rightOperand, (e) => updateObligationTargetConstraint(activePermissionIdx.idx, idx, 'rightOperand', e.target.value))}
+                              <button type="button" onClick={() => deleteObligationTargetConstraint(activePermissionIdx.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Global Rule Constraints */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-slate-500 mb-2">Global Rule Constraints</label>
+                    <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 w-full min-w-0">
+                      {activeObligation.constraints?.map((constraint, idx) => (
+                        <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                          <span className="text-xs text-slate-400 w-8 shrink-0">C{idx+1}:</span>
+                          {renderLeftOperandSelect(constraint.leftOperand, (e) => updateObligationConstraint(activePermissionIdx.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                          {renderOperatorSelect(constraint.operator, (e) => updateObligationConstraint(activePermissionIdx.idx, idx, 'operator', e.target.value), dbOperators)}
+                          {renderRightOperandInput(constraint.rightOperand, (e) => updateObligationConstraint(activePermissionIdx.idx, idx, 'rightOperand', e.target.value))}
+                          <button type="button" onClick={() => deleteObligationConstraint(activePermissionIdx.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
               <div className="text-slate-400 text-xs italic text-center p-8 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
                 No active rules on the canvas. Click "+ Add Permission" or "+ Add Prohibition" inside the tabs header to append a new workspace rule or load an existing file.
               </div>
@@ -1488,10 +1717,10 @@ export default function OdrlEditor() {
               <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500">RULE TABS</h2>
               <button onClick={addPermissionBlock} className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Permission</button>
               <button onClick={addProhibitionBlock} className="bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Prohibition</button>
-              <button onClick={() => setShowDevModal(true)} className="bg-amber-600 hover:bg-amber-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Obligation</button>
+              <button onClick={addObligationBlock} className="bg-amber-600 hover:bg-amber-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Obligation</button>
             </div>
             <div className="flex flex-wrap gap-2 pt-1 overflow-x-auto max-h-24">
-              {(policy.permissions?.length > 0 || policy.prohibitions?.length > 0) ? (
+              {(policy.permissions?.length > 0 || policy.prohibitions?.length > 0 || policy.obligations?.length > 0) ? (
                 <>
                   {policy.permissions?.map((_, idx) => (
                     <button key={`perm-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'permission', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'permission' && idx === activePermissionIdx.idx ? 'bg-blue-600 text-white border-blue-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
@@ -1501,6 +1730,11 @@ export default function OdrlEditor() {
                   {policy.prohibitions?.map((_, idx) => (
                     <button key={`prohib-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'prohibition', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'prohibition' && idx === activePermissionIdx.idx ? 'bg-rose-600 text-white border-rose-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
                       PROHIBITION #{idx + 1} (Rule)
+                    </button>
+                  ))}
+				  {policy.obligations?.map((_, idx) => (
+                    <button key={`obl-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'obligation', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'obligation' && idx === activePermissionIdx.idx ? 'bg-amber-600 text-white border-amber-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
+                      OBLIGATION #{idx + 1} (Rule)
                     </button>
                   ))}
                 </>
@@ -1519,15 +1753,24 @@ export default function OdrlEditor() {
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2 mb-2">JSON-LD / TTL Output</h2>
             <textarea 
               className="w-full flex-1 font-mono text-[11px] bg-slate-900 text-emerald-400 p-3 rounded border border-slate-900 resize-none overflow-y-auto mb-2" 
-              value={codeViewFormat === 'JSON-LD' ? jsonLd : convertJsonLdToTtl(jsonLd)} 
+              value={codeViewFormat === 'JSON-LD' ? jsonLd : ttlOutput } 
               readOnly 
             />
-            <button 
-              onClick={() => setCodeViewFormat(codeViewFormat === 'JSON-LD' ? 'TTL' : 'JSON-LD')} 
-              className="w-full bg-slate-700 hover:bg-slate-800 text-white font-medium py-1.5 px-3 rounded shadow-sm text-xs transition-colors cursor-pointer"
-            >
-              {codeViewFormat === 'JSON-LD' ? 'Display TTL' : 'Display JSON-LD'}
-            </button>
+			<div className="flex gap-2 items-center">
+              <button 
+                onClick={() => setCodeViewFormat(codeViewFormat === 'JSON-LD' ? 'TTL' : 'JSON-LD')} 
+                className="flex-1 bg-slate-700 hover:bg-slate-800 text-white font-medium py-1.5 px-3 rounded shadow-sm text-xs transition-colors cursor-pointer"
+              >
+                {codeViewFormat === 'JSON-LD' ? 'Display TTL' : 'Display JSON-LD'}
+              </button>
+              <button 
+                onClick={() => setShowMagnifyModal(true)} 
+                title="Magnify Content View"
+                className="bg-slate-700 hover:bg-slate-800 text-white font-medium py-1.5 px-3 rounded shadow-sm text-xs transition-colors cursor-pointer shrink-0 flex items-center justify-center"
+              >
+                🔍
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1542,6 +1785,30 @@ export default function OdrlEditor() {
           </div>
         )}
       </main>
+	  
+	  {/* Magnified Output Floating Modal */}
+      {showMagnifyModal && (
+        <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-lg shadow-2xl p-4 w-full max-w-4xl h-[75vh] flex flex-col resize overflow-auto border border-slate-300">
+            <div className="flex justify-between items-center border-b pb-2 mb-3">
+              <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                🔍 Magnified Output ({codeViewFormat})
+              </h3>
+              <button 
+                onClick={() => setShowMagnifyModal(false)} 
+                className="text-slate-500 hover:text-rose-600 font-bold text-sm px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <textarea 
+              className="w-full flex-1 font-mono text-xs bg-slate-900 text-emerald-400 p-4 rounded border border-slate-900 resize-none overflow-y-auto" 
+              value={codeViewFormat === 'JSON-LD' ? jsonLd : ttlOutput} 
+              readOnly 
+            />
+          </div>
+        </div>
+      )}
 
       {/* Feature Under Development Modal */}
       {showDevModal && (

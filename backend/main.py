@@ -3,6 +3,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from collections import defaultdict
+
+from Validate.validate import diagnose_ODRL
+
 import json
 import os
 import rdflib
@@ -349,18 +352,23 @@ async def get_right_operand():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RightOperand query failure: {str(e)}")
 
-@app.post("/api/policy/validate")
-async def validate_policy_shacl(payload: RawJsonLdPayload):
-    if not shacl_validate:
-         return {
-            "valid": False,
-            "message": "PySHACL library execution environment engine missing. Run 'pip install pyshacl' to activate.",
-            "report": "Local environment framework dependency execution error."
-        }
-    
+@app.post("/api/validate")
+async def validate_policy_shacl(payload: Union[Dict[str, Any], RawJsonLdPayload]):
     try:
-        parsed_data = json.loads(payload.json_string)
+        print("In validate")
+        # Handle whether payload is sent as a raw JSON dict or wrapped in RawJsonLdPayload
+        if isinstance(payload, RawJsonLdPayload):
+            parsed_data = json.loads(payload.json_string)
+        elif isinstance(payload, dict):
+            if "json_string" in payload:
+                parsed_data = json.loads(payload["json_string"])
+            else:
+                parsed_data = payload
+        else:
+            parsed_data = payload
+        print("Parsed data")
         
+        # Additional context fixes if needed before diagnosis
         if parsed_data.get("@context") == "http://www.w3.org/ns/odrl/2/":
             parsed_data["@context"] = {
                 "@vocab": "http://www.w3.org/ns/odrl/2/",
@@ -374,22 +382,22 @@ async def validate_policy_shacl(payload: RawJsonLdPayload):
             if "duty" in parsed_data["permission"] and isinstance(parsed_data["permission"]["duty"], dict):
                 if "@type" not in parsed_data["permission"]["duty"] and "type" not in parsed_data["permission"]["duty"]:
                     parsed_data["permission"]["duty"]["@type"] = "Duty"
+
+        # Call the updated diagnose_ODRL function passing the JSON object
+        print("About to diagnose")
+        errors, warnings, parsed_info, is_valid = diagnose_ODRL(parsed_data)
+        print("Diagmosed")
         
-        data_graph_jsonld = json.dumps(parsed_data)
-        
-        conforms, results_graph, results_text = shacl_validate(
-            data_graph=data_graph_jsonld,
-            shacl_graph=OFFICIAL_ODRL_SHACL_SHAPE,
-            data_graph_format="json-ld",
-            shacl_format="turtle",
-            inference="rdfs",
-            serialize_report_graph="turtle"
-        )
+        message = "SHACL compliance assessment engine process pass finalized successfully." if is_valid else "Semantic policy structural validation constraints failed."
+        if errors:
+            message = errors[0]
+            
+        full_report = "\n".join(errors + warnings + parsed_info)
         
         return {
-            "valid": bool(conforms),
-            "message": "SHACL compliance assessment engine process pass finalized successfully." if conforms else "Semantic policy structural validation constraints failed.",
-            "report": results_text
+            "valid": bool(is_valid),
+            "message": message,
+            "report": full_report
         }
 
     except json.JSONDecodeError:
@@ -592,6 +600,51 @@ async def get_policy(filename: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed parsing file structural mappings: {str(e)}")
+        
+@app.post("/api/policy/to-ttl")
+async def convert_policy_to_ttl(payload: Union[Dict[str, Any], RawJsonLdPayload]):
+    try:
+        # Handle whether payload is sent as a raw JSON dict or wrapped in RawJsonLdPayload
+        if isinstance(payload, RawJsonLdPayload):
+            parsed_data = json.loads(payload.json_string)
+        elif isinstance(payload, dict):
+            if "json_string" in payload:
+                parsed_data = json.loads(payload["json_string"])
+            else:
+                parsed_data = payload
+        else:
+            parsed_data = payload
+        
+        # Additional context fixes matching the validate endpoint pipeline
+        if parsed_data.get("@context") == "http://www.w3.org/ns/odrl/2/":
+            parsed_data["@context"] = {
+                "@vocab": "http://www.w3.org/ns/odrl/2/",
+                "odrl": "http://www.w3.org/ns/odrl/2/"
+            }
+            
+        if "permission" in parsed_data and isinstance(parsed_data["permission"], dict):
+            if "@type" not in parsed_data["permission"] and "type" not in parsed_data["permission"]:
+                parsed_data["permission"]["@type"] = "Permission"
+                
+            if "duty" in parsed_data["permission"] and isinstance(parsed_data["permission"]["duty"], dict):
+                if "@type" not in parsed_data["permission"]["duty"] and "type" not in parsed_data["permission"]["duty"]:
+                    parsed_data["permission"]["duty"]["@type"] = "Duty"
+
+        # Parse the JSON-LD object into an rdflib Graph and serialize to Turtle (TTL)
+        graph = rdflib.Graph()
+        graph.parse(data=json.dumps(parsed_data), format="json-ld")
+        ttl_output = graph.serialize(format="turtle")
+        
+        return {
+            "status": "success",
+            "ttl": ttl_output
+        }
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Malformed JSON serialization data context layout stream.")
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"RDF Conversion Engine Error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
