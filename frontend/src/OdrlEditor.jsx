@@ -144,6 +144,7 @@ export default function OdrlEditor() {
           
           // Unified parser for Permissions, Prohibitions, and Obligations
           const parseRule = (p) => ({
+			uid: p.uid || p["@id"] || null, // Added UID parsing
             // 1) Refinements for an action
             action: { 
               name: typeof p.action === 'string' ? p.action : (p.action?.rdfValue || p.action?.["@id"] || ''), 
@@ -173,7 +174,7 @@ export default function OdrlEditor() {
             } : null,
             // 4) All rule level constraints
             constraints: parseConstraints(p),
-            duties: p.duty ? (Array.isArray(p.duty) ? p.duty : [p.duty]).map(d => ({
+            duties: (p.duty || p.remedy || p.consequence) ? (Array.isArray(p.duty || p.remedy || p.consequence) ? (p.duty || p.remedy || p.consequence) : [p.duty || p.remedy] || p.consequence).map(d => ({
               action: typeof d.action === 'string' ? d.action : (d.action?.rdfValue || d.action?.["@id"] || ''),
               // 5) Duty actions constraints
               actionObj: { 
@@ -240,11 +241,13 @@ export default function OdrlEditor() {
   const addPermissionBlock = () => {
     const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
     const newPermission = {
+	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
       assigner: null, actor: null,
       purpose: null,
       target: hasGlobalTargets ? null : { name: '', constraints: [] },
-      constraints: [], duties: []
+      constraints: [], 
+	  duties: []
     };
     const permissions = [...(policy.permissions || []), newPermission];
     setPolicy({ ...policy, permissions });
@@ -266,11 +269,13 @@ export default function OdrlEditor() {
   const addProhibitionBlock = () => {
     const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
     const newProhibition = {
+	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
       assigner: null, actor: null,
       purpose: null,
       target: hasGlobalTargets ? null : { name: '', constraints: [] },
-      constraints: []
+      constraints: [],
+	  duties: []
     };
     const prohibitions = [...(policy.prohibitions || []), newProhibition];
     setPolicy({ ...policy, prohibitions });
@@ -320,19 +325,6 @@ export default function OdrlEditor() {
   });
   const deleteProhibitionActionConstraint = (prohibIdx, indexToRemove) => modifyProhibitions(prohibitions => {
     prohibitions[prohibIdx].action.constraints = prohibitions[prohibIdx].action.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
-  const addDutyActionConstraint = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    if (!permissions[permIdx].duties[dutyIdx].actionObj) {
-      permissions[permIdx].duties[dutyIdx].actionObj = { name: permissions[permIdx].duties[dutyIdx].action || '', constraints: [] };
-    }
-    permissions[permIdx].duties[dutyIdx].actionObj.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
-  });
-  const updateDutyActionConstraint = (permIdx, dutyIdx, index, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actionObj.constraints[index][field] = value;
-  });
-  const deleteDutyActionConstraint = (permIdx, dutyIdx, indexToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actionObj.constraints = permissions[permIdx].duties[dutyIdx].actionObj.constraints.filter((_, idx) => idx !== indexToRemove);
   });
 
   const addPermissionConstraint = (permIdx) => modifyPermissions(permissions => {
@@ -443,45 +435,6 @@ export default function OdrlEditor() {
     prohibitions[prohibIdx].target.constraints = prohibitions[prohibIdx].target.constraints.filter((_, idx) => idx !== indexToRemove);
   });
 
-  const addDutyConstraint = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '>', rightOperand: '' });
-  });
-  const updateDutyConstraint = (permIdx, dutyIdx, constraintIdx, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].constraints[constraintIdx][field] = value;
-  });
-  const deleteDutyConstraint = (permIdx, dutyIdx, constraintIdxToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].constraints = permissions[permIdx].duties[dutyIdx].constraints.filter((_, idx) => idx !== constraintIdxToRemove);
-  });
-
-  const addDutyConsequenceConstraint = (permIdx, dutyIdx, consIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].consequences[consIdx].constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
-  });
-  const updateDutyConsequenceConstraint = (permIdx, dutyIdx, consIdx, constraintIdx, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].consequences[consIdx].constraints[constraintIdx][field] = value;
-  });
-  const deleteDutyConsequenceConstraint = (permIdx, dutyIdx, consIdx, constraintIdxToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].consequences[consIdx].constraints = permissions[permIdx].duties[dutyIdx].consequences[consIdx].constraints.filter((_, idx) => idx !== constraintIdxToRemove);
-  });
-
-  const addDutyAssignerConstraint = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].assigner.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateDutyAssignerConstraint = (permIdx, dutyIdx, idx, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].assigner.constraints[idx][field] = value;
-  });
-  const deleteDutyAssignerConstraint = (permIdx, dutyIdx, idxToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].assigner.constraints = permissions[permIdx].duties[dutyIdx].assigner.constraints.filter((_, idx) => idx !== idxToRemove);
-  });
-
-  const addDutyActorConstraint = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actor.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateDutyActorConstraint = (permIdx, dutyIdx, idx, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actor.constraints[idx][field] = value;
-  });
-  const deleteDutyActorConstraint = (permIdx, dutyIdx, idxToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actor.constraints = permissions[permIdx].duties[dutyIdx].actor.constraints.filter((_, idx) => idx !== idxToRemove);
-  });
 
   // Assigner Block & Constraint Handlers
   const addAssignerBlock = (permIdx) => modifyPermissions(permissions => {
@@ -543,48 +496,6 @@ export default function OdrlEditor() {
     prohibitions[prohibIdx].target = null;
   });
 
-  // Duty & Consequence Handlers
-  const addDutyBlock = (permIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties.push({ action: '', actionObj: { name: '', constraints: [] }, assigner: null, actor: null, constraints: [], consequences: [] });
-  });
-  const updateDutyAction = (permIdx, dutyIdx, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].action = value;
-    if (!permissions[permIdx].duties[dutyIdx].actionObj) {
-      permissions[permIdx].duties[dutyIdx].actionObj = { name: value, constraints: [] };
-    } else {
-      permissions[permIdx].duties[dutyIdx].actionObj.name = value;
-    }
-  });
-  const removeDutyBlock = (permIdx, dutyIdxToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties = permissions[permIdx].duties.filter((_, idx) => idx !== dutyIdxToRemove);
-  });
-
-  // Duty Consequences Handlers
-  const addDutyConsequence = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].consequences.push({ action: '', constraints: [] });
-  });
-  const updateDutyConsequenceAction = (permIdx, dutyIdx, consIdx, value) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].consequences[consIdx].action = value;
-  });
-  const removeDutyConsequence = (permIdx, dutyIdx, consIdxToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].consequences = permissions[permIdx].duties[dutyIdx].consequences.filter((_, idx) => idx !== consIdxToRemove);
-  });
-
-  // Duty Assigner / Actor Sub-handlers
-  const addDutyAssigner = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].assigner = { type: 'Legal Entity', constraints: [] };
-  });
-  const removeDutyAssigner = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].assigner = null;
-  });
-
-  const addDutyActor = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actor = { type: 'Legal Entity', constraints: [] };
-  });
-  const removeDutyActor = (permIdx, dutyIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].duties[dutyIdx].actor = null;
-  });
-
   const handleAddActionVocab = () => {
     const name = prompt("Action Name:");
     const desc = prompt("Descriptive Text:");
@@ -618,11 +529,13 @@ export default function OdrlEditor() {
   const addObligationBlock = () => {
     const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
     const newObligation = {
+	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
       assigner: null, actor: null,
       purpose: null,
       target: hasGlobalTargets ? null : { name: '', constraints: [] },
-      constraints: []
+      constraints: [],
+	  duties: []
     };
     const obligations = [...(policy.obligations || []), newObligation];
     setPolicy({ ...policy, obligations });
@@ -744,6 +657,160 @@ export default function OdrlEditor() {
   
   
   // END ADDING OBLIGATION ELEMENTS HERE
+  
+  
+  // Add Duty Handlers HERE
+  
+  // Unified helper for modifying duties on either permissions or prohibitions
+  const modifyDutyRule = (updaterFn) => {
+    if (activePermissionIdx.type === 'permission') {
+      const permissions = [...(policy.permissions || [])];
+      updaterFn(permissions[activePermissionIdx.idx]);
+      setPolicy({ ...policy, permissions });
+    } else if (activePermissionIdx.type === 'prohibition') {
+      const prohibitions = [...(policy.prohibitions || [])];
+      updaterFn(prohibitions[activePermissionIdx.idx]);
+      setPolicy({ ...policy, prohibitions });
+	} else if (activePermissionIdx.type === 'obligation') {
+      const obligations = [...(policy.obligations || [])];
+      updaterFn(obligations[activePermissionIdx.idx]);
+      setPolicy({ ...policy, obligations });
+    }
+  };
+
+  // Generalized Duty & Consequence Handlers
+  const addDutyBlock = () => modifyDutyRule(rule => {
+    if (!rule.duties) rule.duties = [];
+    rule.duties.push({ action: '', actionObj: { name: '', constraints: [] }, assigner: null, actor: null, constraints: [], consequences: [] });
+  });
+  const updateDutyAction = (dutyIdx, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].action = value;
+    if (!rule.duties[dutyIdx].actionObj) {
+      rule.duties[dutyIdx].actionObj = { name: value, constraints: [] };
+    } else {
+      rule.duties[dutyIdx].actionObj.name = value;
+    }
+  });
+  const removeDutyBlock = (dutyIdxToRemove) => modifyDutyRule(rule => {
+    rule.duties = rule.duties.filter((_, idx) => idx !== dutyIdxToRemove);
+  });
+
+  // Duty Consequences Handlers
+  const addDutyConsequence = (dutyIdx) => modifyDutyRule(rule => {
+    if (!rule.duties[dutyIdx].consequences) rule.duties[dutyIdx].consequences = [];
+    rule.duties[dutyIdx].consequences.push({ action: '', constraints: [] });
+  });
+  const updateDutyConsequenceAction = (dutyIdx, consIdx, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].consequences[consIdx].action = value;
+  });
+  const removeDutyConsequence = (dutyIdx, consIdxToRemove) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].consequences = rule.duties[dutyIdx].consequences.filter((_, idx) => idx !== consIdxToRemove);
+  });
+  
+  const addDutyConsequenceConstraint = (dutyIdx, consIdx) => modifyDutyRule(rule => {
+    if (!rule.duties[dutyIdx].consequences[consIdx].constraints) {
+      rule.duties[dutyIdx].consequences[consIdx].constraints = [];
+    }
+    rule.duties[dutyIdx].consequences[consIdx].constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
+  });
+  const updateDutyConsequenceConstraint = (dutyIdx, consIdx, constraintIdx, field, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].consequences[consIdx].constraints[constraintIdx][field] = value;
+  });
+  const deleteDutyConsequenceConstraint = (dutyIdx, consIdx, constraintIdxToRemove) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].consequences[consIdx].constraints = rule.duties[dutyIdx].consequences[consIdx].constraints.filter((_, idx) => idx !== constraintIdxToRemove);
+  });
+
+  // Duty Assigner / Actor Sub-handlers
+  const addDutyAssigner = (dutyIdx) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].assigner = { type: 'Legal Entity', constraints: [] };
+  });
+  const removeDutyAssigner = (dutyIdx) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].assigner = null;
+  });
+
+  const addDutyActor = (dutyIdx) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actor = { type: 'Legal Entity', constraints: [] };
+  });
+  const removeDutyActor = (dutyIdx) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actor = null;
+  });
+
+  const addDutyActionConstraint = (dutyIdx) => modifyDutyRule(rule => {
+    if (!rule.duties[dutyIdx].actionObj) {
+      rule.duties[dutyIdx].actionObj = { name: rule.duties[dutyIdx].action || '', constraints: [] };
+    }
+    rule.duties[dutyIdx].actionObj.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
+  });
+  const updateDutyActionConstraint = (dutyIdx, index, field, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actionObj.constraints[index][field] = value;
+  });
+  const deleteDutyActionConstraint = (dutyIdx, indexToRemove) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actionObj.constraints = rule.duties[dutyIdx].actionObj.constraints.filter((_, idx) => idx !== indexToRemove);
+  });
+
+  const addDutyConstraint = (dutyIdx) => modifyDutyRule(rule => {
+    if (!rule.duties[dutyIdx].constraints) rule.duties[dutyIdx].constraints = [];
+    rule.duties[dutyIdx].constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '>', rightOperand: '' });
+  });
+  const updateDutyConstraint = (dutyIdx, constraintIdx, field, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].constraints[constraintIdx][field] = value;
+  });
+  const deleteDutyConstraint = (dutyIdx, constraintIdxToRemove) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].constraints = rule.duties[dutyIdx].constraints.filter((_, idx) => idx !== constraintIdxToRemove);
+  });
+
+  const addDutyAssignerConstraint = (dutyIdx) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].assigner.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+  });
+  const updateDutyAssignerConstraint = (dutyIdx, idx, field, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].assigner.constraints[idx][field] = value;
+  });
+  const deleteDutyAssignerConstraint = (dutyIdx, idxToRemove) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].assigner.constraints = rule.duties[dutyIdx].assigner.constraints.filter((_, idx) => idx !== idxToRemove);
+  });
+
+  const addDutyActorConstraint = (dutyIdx) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actor.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+  });
+  const updateDutyActorConstraint = (dutyIdx, idx, field, value) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actor.constraints[idx][field] = value;
+  });
+  const deleteDutyActorConstraint = (dutyIdx, idxToRemove) => modifyDutyRule(rule => {
+    rule.duties[dutyIdx].actor.constraints = rule.duties[dutyIdx].actor.constraints.filter((_, idx) => idx !== idxToRemove);
+  });
+  
+  
+  
+  // Rule UID Handlers
+  const addRuleUid = () => {
+    //const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+    // Note: ensure 'isPerm', 'isProhib', 'isOblig' or equivalent logic is accessible, 
+    // or use activePermissionIdx.type to determine listKey:
+    const activeType = activePermissionIdx.type;
+    const keyMap = { permission: 'permissions', prohibition: 'prohibitions', obligation: 'obligations' };
+    const targetKey = keyMap[activeType];
+    const items = [...policy[targetKey]];
+    items[activePermissionIdx.idx].uid = '';
+    setPolicy({ ...policy, [targetKey]: items });
+  };
+
+  const updateRuleUid = (value) => {
+    const activeType = activePermissionIdx.type;
+    const keyMap = { permission: 'permissions', prohibition: 'prohibitions', obligation: 'obligations' };
+    const targetKey = keyMap[activeType];
+    const items = [...policy[targetKey]];
+    items[activePermissionIdx.idx].uid = value;
+    setPolicy({ ...policy, [targetKey]: items });
+  };
+
+  const removeRuleUid = () => {
+    const activeType = activePermissionIdx.type;
+    const keyMap = { permission: 'permissions', prohibition: 'prohibitions', obligation: 'obligations' };
+    const targetKey = keyMap[activeType];
+    const items = [...policy[targetKey]];
+    items[activePermissionIdx.idx].uid = null;
+    setPolicy({ ...policy, [targetKey]: items });
+  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 font-sans text-sm text-slate-800 relative w-full min-w-[1280px]">
@@ -952,7 +1019,13 @@ export default function OdrlEditor() {
             {/* Unified Rule Builder Panel (Permission / Prohibition / Obligation) */}
               {(() => {
                 const activeRule = activePermission || activeProhibition || activeObligation;
-                if (!activeRule) return null;
+                if (!activeRule) {
+                  return (
+                    <div className="text-slate-400 text-xs italic text-center p-8 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+                      No active rules on the canvas. Click "+ Add Permission" or "+ Add Prohibition" or "+ Add Obligation" inside the tabs header to append a new workspace rule or load an existing file.
+                    </div>
+                  );
+                }
 
                 const isPerm = !!activePermission;
                 const isProhib = !!activeProhibition;
@@ -969,35 +1042,35 @@ export default function OdrlEditor() {
     
                 const addConstraint = isPerm ? () => addPermissionConstraint(idxObj.idx) : isProhib ? () => addProhibitionConstraint(idxObj.idx) : () => addObligationConstraint(idxObj.idx);
                 const updateConstraint = isPerm ? updatePermissionConstraint : isProhib ? updateProhibitionConstraint : updateObligationConstraint;
-                const deleteConstraint = isPerm ? deletePermissionConstraint : isProhib ? deletePermissionConstraint : deleteObligationConstraint;
+                const deleteConstraint = isPerm ? deletePermissionConstraint : isProhib ? deleteProhibitionConstraint : deleteObligationConstraint;
 
                 const addAssigner = isPerm ? () => addAssignerBlock(idxObj.idx) : isProhib ? () => addProhibitionAssignerBlock(idxObj.idx) : () => addObligationAssignerBlock(idxObj.idx);
                 const removeAssigner = isPerm ? () => removeAssignerBlock(idxObj.idx) : isProhib ? () => removeProhibitionAssignerBlock(idxObj.idx) : () => removeObligationAssignerBlock(idxObj.idx);
                 const addAssignerConstraintFn = isPerm ? () => addAssignerConstraint(idxObj.idx) : isProhib ? () => addProhibitionAssignerConstraint(idxObj.idx) : () => addObligationAssignerConstraint(idxObj.idx);
                 const updateAssignerConstraintFn = isPerm ? updateAssignerConstraint : isProhib ? updateProhibitionAssignerConstraint : updateObligationAssignerConstraint;
-                const deleteAssignerConstraintFn = isPerm ? deleteAssignerConstraint : isProhib ? deleteAssignerConstraint : deleteObligationAssignerConstraint;
+                const deleteAssignerConstraintFn = isPerm ? deleteAssignerConstraint : isProhib ? deleteProhibitionAssignerConstraint : deleteObligationAssignerConstraint;
 
                 const addActor = isPerm ? () => addActorBlock(idxObj.idx) : isProhib ? () => addProhibitionActorBlock(idxObj.idx) : () => addObligationActorBlock(idxObj.idx);
                 const removeActor = isPerm ? () => removeActorBlock(idxObj.idx) : isProhib ? () => removeProhibitionActorBlock(idxObj.idx) : () => removeObligationActorBlock(idxObj.idx);
                 const addActorConstraintFn = isPerm ? () => addActorConstraint(idxObj.idx) : isProhib ? () => addProhibitionActorConstraint(idxObj.idx) : () => addObligationActorConstraint(idxObj.idx);
                 const updateActorConstraintFn = isPerm ? updateActorConstraint : isProhib ? updateProhibitionActorConstraint : updateObligationActorConstraint;
-                const deleteActorConstraintFn = isPerm ? deleteActorConstraint : isProhib ? deleteActorConstraint : deleteObligationActorConstraint;
+                const deleteActorConstraintFn = isPerm ? deleteActorConstraint : isProhib ? deleteProhibitionActorConstraint : deleteObligationActorConstraint;
 
                 const addPurpose = isPerm ? () => addPurposeBlock(idxObj.idx) : isProhib ? () => addProhibitionPurposeBlock(idxObj.idx) : () => addObligationPurposeBlock(idxObj.idx);
                 const removePurpose = isPerm ? () => removePurposeBlock(idxObj.idx) : isProhib ? () => removeProhibitionPurposeBlock(idxObj.idx) : () => removeObligationPurposeBlock(idxObj.idx);
                 const addPurposeConstraintFn = isPerm ? () => addPurposeConstraint(idxObj.idx) : isProhib ? () => addProhibitionPurposeConstraint(idxObj.idx) : () => addObligationPurposeConstraint(idxObj.idx);
                 const updatePurposeConstraintFn = isPerm ? updatePurposeConstraint : isProhib ? updateProhibitionPurposeConstraint : updateObligationPurposeConstraint;
-                const deletePurposeConstraintFn = isPerm ? deletePurposeConstraint : isProhib ? deletePurposeConstraint : deleteObligationPurposeConstraint;
+                const deletePurposeConstraintFn = isPerm ? deletePurposeConstraint : isProhib ? deleteProhibitionPurposeConstraint : deleteObligationPurposeConstraint;
 
                 const addTarget = isPerm ? () => addTargetBlock(idxObj.idx) : isProhib ? () => addProhibitionTargetBlock(idxObj.idx) : () => addObligationTargetBlock(idxObj.idx);
                 const removeTarget = isPerm ? () => removeTargetBlock(idxObj.idx) : isProhib ? () => removeProhibitionTargetBlock(idxObj.idx) : () => removeObligationTargetBlock(idxObj.idx);
                 const addTargetConstraintFn = isPerm ? () => addTargetConstraint(idxObj.idx) : isProhib ? () => addProhibitionTargetConstraint(idxObj.idx) : () => addObligationTargetConstraint(idxObj.idx);
                 const updateTargetConstraintFn = isPerm ? updateTargetConstraint : isProhib ? updateProhibitionTargetConstraint : updateObligationTargetConstraint;
-                const deleteTargetConstraintFn = isPerm ? deleteTargetConstraint : isProhib ? deleteTargetConstraint : deleteObligationTargetConstraint;
+                const deleteTargetConstraintFn = isPerm ? deleteTargetConstraint : isProhib ? deleteProhibitionTargetConstraint : deleteObligationTargetConstraint;
 
                 const addActionConstraintFn = isPerm ? () => addActionConstraint(idxObj.idx) : isProhib ? () => addProhibitionActionConstraint(idxObj.idx) : () => addObligationActionConstraint(idxObj.idx);
                 const updateActionConstraintFn = isPerm ? updateActionConstraint : isProhib ? updateProhibitionActionConstraint : updateObligationActionConstraint;
-                const deleteActionConstraintFn = isPerm ? deleteActionConstraint : isProhib ? deleteActionConstraint : deleteObligationActionConstraint;
+                const deleteActionConstraintFn = isPerm ? deleteActionConstraint : isProhib ? deleteProhibitionActionConstraint : deleteObligationActionConstraint;
 
                 return (
                   <div className="border border-slate-300 rounded-lg p-4 bg-slate-50 flex flex-col gap-4 relative">
@@ -1012,10 +1085,38 @@ export default function OdrlEditor() {
                           {!activeRule.actor && <button onClick={addActor} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assignee</button>}
                           {!activeRule.purpose && <button onClick={addPurpose} className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Purpose</button>}
                           {hasGlobalTargets && !activeRule.target && <button onClick={addTarget} className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Target</button>}
-                          {isPerm && <button onClick={() => addDutyBlock(idxObj.idx)} className="text-xs bg-amber-600 text-white px-2 py-1 rounded hover:bg-amber-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Duty</button>}
+                          {(isPerm || isProhib || isOblig) && (
+                            <button 
+                              onClick={() => addDutyBlock()} 
+                              className="text-xs bg-amber-600 text-white px-2 py-1 rounded hover:bg-amber-700 transition-colors cursor-pointer font-medium shadow-sm"
+                            >
+                              {isProhib ? '+ Add Remedy' : isOblig ? '+ Add Consequence' : '+ Add Duty'}
+                            </button>
+                          )}
+						  {(activeRule.uid === null || activeRule.uid === undefined) && (
+                            <button onClick={addRuleUid} className="text-xs bg-slate-700 text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer font-medium shadow-sm">
+                              + UID
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
+					
+					{activeRule.uid !== null && activeRule.uid !== undefined && (
+                      <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs font-bold uppercase text-slate-600">Rule UID</label>
+                          <button type="button" onClick={removeRuleUid} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. urn:rule:permission-1" 
+                          className="w-full border p-1.5 rounded text-xs bg-white font-mono" 
+                          value={activeRule.uid} 
+                          onChange={(e) => updateRuleUid(e.target.value)} 
+                        />
+                      </div>
+                    )}
 
                     {/* Action Block */}
                     <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
@@ -1216,33 +1317,37 @@ export default function OdrlEditor() {
                       </div>
                     </div>
 
-                    {/* Duties Block (Permissions Only) */}
-                    {isPerm && activeRule.duties && activeRule.duties.map((dutyBlock, dutyIdx) => (
+                    {/* Duties Block */}
+                    {(isPerm || isProhib || isOblig) && activeRule.duties && activeRule.duties.map((dutyBlock, dutyIdx) => (
                       <div key={dutyIdx} className="border border-amber-200 bg-amber-50/50 rounded-lg p-4 flex flex-col gap-3">
                         <div className="flex justify-between items-start border-b border-amber-100 pb-1.5 gap-4">
                           <div className="flex flex-col gap-1.5 flex-1">
-                            <div className="font-bold text-amber-800 text-xs uppercase">🛡️ Duty Block #{dutyIdx + 1}</div>
+                            <div className="font-bold text-amber-800 text-xs uppercase">
+                              {isProhib ? `🛡️ Remedy Block #${dutyIdx + 1}` : isOblig ? `🛡️ Consequence Block #${dutyIdx + 1}`: `🛡️ Duty Block #${dutyIdx + 1}`}
+                            </div>
                             <div className="flex flex-wrap gap-2">
-                              <button onClick={() => addDutyConstraint(idxObj.idx, dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Duty Constraint</button>
-                              {!dutyBlock.assigner && <button onClick={() => addDutyAssigner(idxObj.idx, dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Assigner</button>}
-                              {!dutyBlock.actor && <button onClick={() => addDutyActor(idxObj.idx, dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Assignee</button>}
-                              <button onClick={() => addDutyConsequence(idxObj.idx, dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Consequence</button>
+                              <button onClick={() => addDutyConstraint(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Constraint</button>
+                              {!dutyBlock.assigner && <button onClick={() => addDutyAssigner(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Assigner</button>}
+                              {!dutyBlock.actor && <button onClick={() => addDutyActor(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Assignee</button>}
+							  {isPerm && (
+                                <button onClick={() => addDutyConsequence(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Consequence</button>
+							  )}
                             </div>
                           </div>
-                          <button type="button" onClick={() => removeDutyBlock(idxObj.idx, dutyIdx)} className="text-amber-700 hover:text-amber-900 font-bold text-md leading-none p-1 rounded hover:bg-amber-100 transition-all cursor-pointer shrink-0">✕</button>
+                          <button type="button" onClick={() => removeDutyBlock(dutyIdx)} className="text-amber-700 hover:text-amber-900 font-bold text-md leading-none p-1 rounded hover:bg-amber-100 transition-all cursor-pointer shrink-0">✕</button>
                         </div>
             
                         <div className="bg-white p-3 border border-amber-200 rounded-lg shadow-xs flex flex-col gap-3">
                           <div className="flex justify-between items-center">
-                            <label className="text-[11px] font-bold uppercase text-amber-900">Duty Action Instruction</label>
-                            <button onClick={() => addDutyActionConstraint(idxObj.idx, dutyIdx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium">+ Add Action Refinement</button>
+                            <label className="text-[11px] font-bold uppercase text-amber-900">Action</label>
+                            <button onClick={() => addDutyActionConstraint(dutyIdx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium">+ Add Action Refinement</button>
                           </div>
                           <select 
                             className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
                             value={dutyBlock.action || ''} 
-                            onChange={(e) => updateDutyAction(idxObj.idx, dutyIdx, e.target.value)}
+                            onChange={(e) => updateDutyAction(dutyIdx, e.target.value)}
                           >
-                            <option value="">-- Select Duty Action --</option>
+                            <option value="">-- Select Action --</option>
                             {dbActions.map(([path, uri, definition]) => (
                               <option key={uri} value={uri} title={definition}>{path}</option>
                             ))}
@@ -1253,10 +1358,10 @@ export default function OdrlEditor() {
                               {dutyBlock.actionObj.constraints.map((constraint, idx) => (
                                 <div key={idx} className="flex gap-2 items-center w-full min-w-0">
                                   <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                  {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyActionConstraint(idxObj.idx, dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                  {renderOperatorSelect(constraint.operator, (e) => updateDutyActionConstraint(idxObj.idx, dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                                  {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyActionConstraint(idxObj.idx, dutyIdx, idx, 'rightOperand', e.target.value))}
-                                  <button type="button" onClick={() => deleteDutyActionConstraint(idxObj.idx, dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                                  {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyActionConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                                  {renderOperatorSelect(constraint.operator, (e) => updateDutyActionConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
+                                  {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyActionConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
+                                  <button type="button" onClick={() => deleteDutyActionConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
                                 </div>
                               ))}
                             </div>
@@ -1270,10 +1375,10 @@ export default function OdrlEditor() {
                            {dutyBlock.constraints.map((constraint, idx) => (
                              <div key={idx} className="flex gap-2 items-center w-full min-w-0">
                                <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                               {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyConstraint(idxObj.idx, dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                               {renderOperatorSelect(constraint.operator, (e) => updateDutyConstraint(idxObj.idx, dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                               {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyConstraint(idxObj.idx, dutyIdx, idx, 'rightOperand', e.target.value))}
-                               <button type="button" onClick={() => deleteDutyConstraint(idxObj.idx, dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
+                               {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                               {renderOperatorSelect(constraint.operator, (e) => updateDutyConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
+                               {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
+                               <button type="button" onClick={() => deleteDutyConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
                              </div>
                            ))}
                           </div>
@@ -1283,16 +1388,18 @@ export default function OdrlEditor() {
                         {dutyBlock.assigner && (
                           <div className="bg-white p-2.5 border border-amber-200 rounded-md shadow-xs flex flex-col gap-2">
                             <div className="flex justify-between items-center">
-                              <label className="text-[11px] font-bold uppercase text-slate-600">Duty Assigner</label>
+                              <label className="text-[11px] font-bold uppercase text-slate-600">Assigner</label>
                               <div className="flex items-center gap-2">
-                                <button onClick={() => addDutyAssignerConstraint(idxObj.idx, dutyIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
-                                <button type="button" onClick={() => removeDutyAssigner(idxObj.idx, dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
+                                <button onClick={() => addDutyAssignerConstraint(dutyIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
+                                <button type="button" onClick={() => removeDutyAssigner(dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
                               </div>
                             </div>
                             <select className="w-full border p-1 rounded text-xs bg-white font-medium" value={dutyBlock.assigner.type} onChange={(e) => {
-                              const permissions = [...policy.permissions];
-                              permissions[idxObj.idx].duties[dutyIdx].assigner.type = e.target.value;
-                              setPolicy({...policy, permissions});
+                              // const listKey = isPerm ? 'permissions' : 'prohibitions';
+							  const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                              const items = [...policy[listKey]];
+                              items[idxObj.idx].duties[dutyIdx].assigner.type = e.target.value;
+                              setPolicy({...policy, [listKey]: items});
                             }}>
                               <option value="Legal Entity">Legal Entity</option>
                               <option value="Natural Person">Natural Person</option>
@@ -1304,10 +1411,10 @@ export default function OdrlEditor() {
                                 {dutyBlock.assigner.constraints.map((constraint, idx) => (
                                   <div key={idx} className="flex gap-1.5 items-center w-full min-w-0">
                                     <span className="text-[10px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                    {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyAssignerConstraint(idxObj.idx, dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                    {renderOperatorSelect(constraint.operator, (e) => updateDutyAssignerConstraint(idxObj.idx, dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                                    {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyAssignerConstraint(idxObj.idx, dutyIdx, idx, 'rightOperand', e.target.value))}
-                                    <button type="button" onClick={() => deleteDutyAssignerConstraint(idxObj.idx, dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
+                                    {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyAssignerConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                                    {renderOperatorSelect(constraint.operator, (e) => updateDutyAssignerConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
+                                    {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyAssignerConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
+                                    <button type="button" onClick={() => deleteDutyAssignerConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
                                   </div>
                                 ))}
                               </div>
@@ -1319,16 +1426,18 @@ export default function OdrlEditor() {
                         {dutyBlock.actor && (
                           <div className="bg-white p-2.5 border border-amber-200 rounded-md shadow-xs flex flex-col gap-2">
                             <div className="flex justify-between items-center">
-                              <label className="text-[11px] font-bold uppercase text-indigo-600">Duty Assignee</label>
+                              <label className="text-[11px] font-bold uppercase text-indigo-600">Assignee</label>
                               <div className="flex items-center gap-2">
-                                <button onClick={() => addDutyActorConstraint(idxObj.idx, dutyIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
-                                <button type="button" onClick={() => removeDutyActor(idxObj.idx, dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
+                                <button onClick={() => addDutyActorConstraint(dutyIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
+                                <button type="button" onClick={() => removeDutyActor(dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
                               </div>
                             </div>
                             <select className="w-full border p-1 rounded text-xs bg-white font-medium" value={dutyBlock.actor.type} onChange={(e) => {
-                              const permissions = [...policy.permissions];
-                              permissions[idxObj.idx].duties[dutyIdx].actor.type = e.target.value;
-                              setPolicy({...policy, permissions});
+                              // const listKey = isPerm ? 'permissions' : 'prohibitions';
+							  const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                              const items = [...policy[listKey]];
+                              items[idxObj.idx].duties[dutyIdx].actor.type = e.target.value;
+                              setPolicy({...policy, [listKey]: items});
                             }}>
                               <option value="Legal Entity">Legal Entity</option>
                               <option value="Natural Person">Natural Person</option>
@@ -1340,16 +1449,60 @@ export default function OdrlEditor() {
                                 {dutyBlock.actor.constraints.map((constraint, idx) => (
                                   <div key={idx} className="flex gap-1.5 items-center w-full min-w-0">
                                     <span className="text-[10px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                    {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyActorConstraint(idxObj.idx, dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                    {renderOperatorSelect(constraint.operator, (e) => updateDutyActorConstraint(idxObj.idx, dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                                    {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyActorConstraint(idxObj.idx, dutyIdx, idx, 'rightOperand', e.target.value))}
-                                    <button type="button" onClick={() => deleteDutyActorConstraint(idxObj.idx, dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
+                                    {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyActorConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
+                                    {renderOperatorSelect(constraint.operator, (e) => updateDutyActorConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
+                                    {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyActorConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
+                                    <button type="button" onClick={() => deleteDutyActorConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
                                   </div>
                                 ))}
                               </div>
                             )}
                           </div>
                         )}
+						
+						{/* Duty Consequences Subblock */}
+                        {dutyBlock.consequences?.length > 0 && (
+                          <div className="flex flex-col gap-3 mt-2">
+                            <label className="text-[11px] font-bold uppercase text-amber-900">Consequences</label>
+                            {dutyBlock.consequences.map((cons, consIdx) => (
+                              <div key={consIdx} className="bg-white p-3 border border-amber-200 rounded-md shadow-xs flex flex-col gap-2.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[11px] font-bold text-amber-900">Consequence #{consIdx + 1}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button onClick={() => addDutyConsequenceConstraint(dutyIdx, consIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
+                                    <button type="button" onClick={() => removeDutyConsequence(dutyIdx, consIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
+                                  </div>
+                                </div>
+                                <select 
+                                  className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
+                                  value={cons.action || ''} 
+                                  onChange={(e) => updateDutyConsequenceAction(dutyIdx, consIdx, e.target.value)}
+                                >
+                                  <option value="">-- Select Consequence Action --</option>
+                                  {dbActions.map(([path, uri, definition]) => (
+                                    <option key={uri} value={uri} title={definition}>{path}</option>
+                                  ))}
+                                </select>
+
+                                {cons.constraints?.length > 0 && (
+                                  <div className="flex flex-col gap-1.5 pl-2 border-l-2 border-amber-400 mt-1 w-full min-w-0">
+                                    {cons.constraints.map((constraint, cIdx) => (
+                                      <div key={cIdx} className="flex gap-1.5 items-center w-full min-w-0">
+                                        <span className="text-[10px] text-slate-400 w-8 shrink-0">C{cIdx+1}:</span>
+                                        {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyConsequenceConstraint(dutyIdx, consIdx, cIdx, 'leftOperand', e.target.value), dbLeftOperands)}
+                                        {renderOperatorSelect(constraint.operator, (e) => updateDutyConsequenceConstraint(dutyIdx, consIdx, cIdx, 'operator', e.target.value), dbOperators)}
+                                        {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyConsequenceConstraint(dutyIdx, consIdx, cIdx, 'rightOperand', e.target.value))}
+                                        <button type="button" onClick={() => deleteDutyConsequenceConstraint(dutyIdx, consIdx, cIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+						
+						
                       </div>
                     ))}
                   </div>

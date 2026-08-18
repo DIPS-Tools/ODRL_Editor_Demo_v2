@@ -149,6 +149,10 @@ export function useOdrlPolicy() {
       if (policy.permissions && policy.permissions.length > 0) {
         doc.permission = policy.permissions.map(perm => {
           const pObj = {};
+		  
+		  if (perm.uid) {
+            pObj.uid = perm.uid; // Places uid at the top of the permission rule block
+          }
 
           if (perm.action?.name) {
             if (perm.action.constraints && perm.action.constraints.length > 0) {
@@ -344,6 +348,10 @@ export function useOdrlPolicy() {
       if (policy.prohibitions && policy.prohibitions.length > 0) {
         doc.prohibition = policy.prohibitions.map(prohib => {
           const prObj = {};
+		  
+		  if (prohib.uid) {
+            prObj.uid = prohib.uid; // Places uid at the top of the prohibition rule block
+          }
 
           if (prohib.action?.name) {
             if (prohib.action.constraints && prohib.action.constraints.length > 0) {
@@ -461,6 +469,62 @@ export function useOdrlPolicy() {
           if (prohibConstraintsList.length > 0) {
             prObj.constraint = prohibConstraintsList;
           }
+		  
+		  if (prohib.duties && prohib.duties.length > 0) {
+            prObj.remedy = prohib.duties.map(duty => {
+              const dObj = {};
+              
+              const dutyActionName = duty.actionObj?.name || duty.action;
+              if (dutyActionName) {
+                if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
+                  dObj.action = {
+                    "@id": dutyActionName,
+                    "refinement": buildConstraintsObj(duty.actionObj.constraints)
+                  };
+                } else {
+                  dObj.action = dutyActionName;
+                }
+              }
+
+              if (duty.assigner) {
+                const constraintsObj = buildConstraintsObj(duty.assigner.constraints);
+                if (constraintsObj) {
+                  dObj.assigner = {
+                    "@type": duty.assigner.type,
+                    "constraint": constraintsObj
+                  };
+                } else {
+                  dObj.assigner = duty.assigner.type;
+                }
+              }  
+
+              if (duty.actor) {
+                const constraintsObj = buildConstraintsObj(duty.actor.constraints);
+                if (constraintsObj) {
+                  dObj.actor = {
+                    "@type": duty.actor.type,
+                    "constraint": constraintsObj
+                  };
+                } else {
+                  dObj.actor = duty.actor.type;
+                }
+              }  
+
+              const dutyConst = buildConstraintsObj(duty.constraints);
+              if (dutyConst) {
+                dObj.constraint = dutyConst;
+              }
+
+              if (duty.consequences && duty.consequences.length > 0) {
+                dObj.consequence = duty.consequences.map(cons => ({
+                  action: cons.action,
+                  ...(buildConstraintsObj(cons.constraints) && { constraint: buildConstraintsObj(cons.constraints) })
+                }));
+              }
+
+              return dObj;
+            });
+          }
 
           return prObj;
         });
@@ -470,6 +534,10 @@ export function useOdrlPolicy() {
       if (policy.obligations && policy.obligations.length > 0) {
         doc.obligation = policy.obligations.map(obl => {
           const obObj = {};
+		  
+		  if (obl.uid) {
+            obObj.uid = obl.uid; // Places uid at the top of the obligation rule block
+          }
 
           if (obl.action?.name) {
             if (obl.action.constraints && obl.action.constraints.length > 0) {
@@ -548,6 +616,62 @@ export function useOdrlPolicy() {
 
           if (constraintsList.length > 0) {
             obObj.constraint = constraintsList;
+          }
+		  
+		  if (obl.duties && obl.duties.length > 0) {
+            obObj.consequence = obl.duties.map(duty => {
+              const dObj = {};
+              
+              const dutyActionName = duty.actionObj?.name || duty.action;
+              if (dutyActionName) {
+                if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
+                  dObj.action = {
+                    "@id": dutyActionName,
+                    "refinement": buildConstraintsObj(duty.actionObj.constraints)
+                  };
+                } else {
+                  dObj.action = dutyActionName;
+                }
+              }
+
+              if (duty.assigner) {
+                const constraintsObj = buildConstraintsObj(duty.assigner.constraints);
+                if (constraintsObj) {
+                  dObj.assigner = {
+                    "@type": duty.assigner.type,
+                    "constraint": constraintsObj
+                  };
+                } else {
+                  dObj.assigner = duty.assigner.type;
+                }
+              }  
+
+              if (duty.actor) {
+                const constraintsObj = buildConstraintsObj(duty.actor.constraints);
+                if (constraintsObj) {
+                  dObj.actor = {
+                    "@type": duty.actor.type,
+                    "constraint": constraintsObj
+                  };
+                } else {
+                  dObj.actor = duty.actor.type;
+                }
+              }  
+
+              const dutyConst = buildConstraintsObj(duty.constraints);
+              if (dutyConst) {
+                dObj.constraint = dutyConst;
+              }
+
+              if (duty.consequences && duty.consequences.length > 0) {
+                dObj.consequence = duty.consequences.map(cons => ({
+                  action: cons.action,
+                  ...(buildConstraintsObj(cons.constraints) && { constraint: buildConstraintsObj(cons.constraints) })
+                }));
+              }
+
+              return dObj;
+            });
           }
       
           return obObj;

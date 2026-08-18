@@ -229,37 +229,58 @@ class PublishPolicyPayload(BaseModel):
 
 def _build_hierarchy_tree(sparql_query: str) -> List[List[str]]:
     """Builds an alphabetized, deduplicated hierarchical tree array from SPARQL results."""
+    print("<< INTO BUILD HIERARCHY TREE >>")
     qres = vocab_graph.query(sparql_query)
-    
+        
     children_map = defaultdict(list)
     label_to_uri = {}
     label_to_def = {}
     
     all_children = set()
     all_parents = set()
-
+    has_parent = set()
+ 
+    TOT_RESP = ""
+    
     for row in qres:
-        sub_label = str(row.sub_label) if row.sub_label else "Unknown"
-        sub_uri = str(row.sub_action)
-        sub_def = str(row.sub_definition)
+        if sparql_query == actions_query:
+            TOT_RESP = TOT_RESP + str("[[" + str(row.action) + " / " + str(row.sub_action) + "]],")
+            
+        sub_uri = str(row.sub_action) if row.sub_action else ""
+        if not sub_uri:
+            continue
+            
+        # Fallback to URI fragment/local name if sub_label is missing
+        if row.sub_label:
+            sub_label = str(row.sub_label)
+        else:
+            sub_label = sub_uri.split("#")[-1] if "#" in sub_uri else sub_uri.split("/")[-1]
+            
+        sub_def = str(row.sub_definition) if row.sub_definition else "No definition available"
         
         label_to_uri[sub_label] = sub_uri
         label_to_def[sub_label] = sub_def
         all_children.add(sub_label)
 
-        if row.action and row.label:
-            parent_label = str(row.label)
-            label_to_uri[parent_label] = str(row.action)
+        if row.action:
+            parent_uri = str(row.action)
+            # Fallback to URI fragment/local name if parent label is missing
+            if row.label:
+                parent_label = str(row.label)
+            else:
+                parent_label = parent_uri.split("#")[-1] if "#" in parent_uri else parent_uri.split("/")[-1]
+                
+            label_to_uri[parent_label] = parent_uri
             if row.definition:
                 label_to_def[parent_label] = str(row.definition)
             
             children_map[parent_label].append(sub_label)
             all_parents.add(parent_label)
+            has_parent.add(sub_label)
 
-    # Roots are parents that aren't children, PLUS any children that have no parent relationships
-    explicit_roots = all_parents - all_children
-    orphan_nodes = all_children - all_parents
-    roots = explicit_roots.union(orphan_nodes)
+    # Roots are all nodes (children + parents) that do not have a parent
+    all_nodes = all_children.union(all_parents)
+    roots = all_nodes - has_parent
 
     if not roots and all_children:
         roots = all_children
@@ -283,9 +304,12 @@ def _build_hierarchy_tree(sparql_query: str) -> List[List[str]]:
 
     for root in sorted(roots):
         build_tree_paths(root, [])
+        
+    if sparql_query == actions_query:
+        print("Total response was <<< " + TOT_RESP)
 
     return sorted(formatted_rows, key=lambda x: x[0])
-
+    
 # Robust constraint item parser
 def _parse_constraint_item(c: dict) -> dict:
     raw_op = str(c.get("operator", "="))
