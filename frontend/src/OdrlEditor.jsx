@@ -89,6 +89,24 @@ export default function OdrlEditor() {
     }
   };
 
+  // Helper to recursively parse single constraints or logical constraint groups
+  const parseSingleConstraintItem = (c) => {
+    const logicalOp = ['and', 'or', 'xone', 'andSequence'].find(op => c[op]);
+    if (logicalOp && Array.isArray(c[logicalOp])) {
+      return {
+        isGroup: true,
+        logicalOp: logicalOp,
+        constraints: c[logicalOp].map(subC => parseSingleConstraintItem(subC))
+      };
+    } else {
+      return {
+        leftOperand: c.leftOperand || '',
+        operator: c.operator || '',
+        rightOperand: c.rightOperand || ''
+      };
+    }
+  };
+
   // Helper to parse constraints or refinements from any ODRL entity object/array
   const parseConstraints = (obj) => {
     const raw = obj?.constraint || obj?.refinement;
@@ -97,25 +115,7 @@ export default function OdrlEditor() {
     const parsed = [];
 
     rawList.forEach(c => {
-      // Check for ODRL logical constraint operators
-      const logicalOp = ['and', 'or', 'xone'].find(op => c[op]);
-      if (logicalOp && Array.isArray(c[logicalOp])) {
-        // Flatten sub-constraints inside the logical block
-        c[logicalOp].forEach(subC => {
-          parsed.push({
-            leftOperand: subC.leftOperand || '',
-            operator: subC.operator || '',
-            rightOperand: subC.rightOperand || ''
-          });
-        });
-      } else if (c.leftOperand || c.operator || c.rightOperand) {
-        // Standard single constraint
-        parsed.push({
-          leftOperand: c.leftOperand || '',
-          operator: c.operator || '',
-          rightOperand: c.rightOperand || ''
-        });
-      }
+      parsed.push(parseSingleConstraintItem(c));
     });
 
     return parsed;
@@ -126,6 +126,27 @@ export default function OdrlEditor() {
     if (!val) return 'Legal Entity';
     if (typeof val === 'string') return val;
     return val.type || val["@type"] || 'Legal Entity';
+  };
+  
+  // Robustly parse policy-level targets (supporting AssetCollections, strings, or arrays)
+  const parseTargets = (rawTarget) => {
+    if (!rawTarget) return [];
+    const list = Array.isArray(rawTarget) ? rawTarget : [rawTarget];
+    let extracted = [];
+    list.forEach(t => {
+      if (typeof t === 'string') {
+        extracted.push(t);
+      } else if (t && typeof t === 'object') {
+        if (Array.isArray(t.source)) {
+          extracted.push(...t.source);
+        } else if (t.source) {
+          extracted.push(t.source);
+        } else if (t["@id"] || t.id) {
+          extracted.push(t["@id"] || t.id);
+        }
+      }
+    });
+    return extracted;
   };
   
   // Handler for uploading and parsing a local policy .json file into the editor
@@ -140,7 +161,7 @@ export default function OdrlEditor() {
         if (typeof content === 'string') {
           const parsedJson = JSON.parse(content);
           
-          const newTargets = parsedJson.target ? (Array.isArray(parsedJson.target) ? parsedJson.target : [parsedJson.target]) : [];
+          const newTargets = parseTargets(parsedJson.target);
           
           // Unified parser for Permissions, Prohibitions, and Obligations
           const parseRule = (p) => ({
@@ -169,9 +190,10 @@ export default function OdrlEditor() {
             target: p.target ? { 
               name: typeof p.target === 'string' 
                 ? p.target 
-                : (p.target?.source || p.target?.["@id"] || p.target?.rdfValue || p.target?.id || ''), 
+                : (Array.isArray(p.target.source) ? p.target.source.join(', ') : p.target.source || p.target?.["@id"] || p.target?.rdfValue || p.target?.id || ''), 
               constraints: parseConstraints(p.target) 
             } : null,
+			
             // 4) All rule level constraints
             constraints: parseConstraints(p),
             duties: (p.duty || p.remedy || p.consequence) ? (Array.isArray(p.duty || p.remedy || p.consequence) ? (p.duty || p.remedy || p.consequence) : [p.duty || p.remedy] || p.consequence).map(d => ({
@@ -240,6 +262,7 @@ export default function OdrlEditor() {
   // Permission Block Handlers
   const addPermissionBlock = () => {
     const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+	// const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => typeof t === 'string' ? t.trim() !== '' : !!t);
     const newPermission = {
 	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
@@ -267,7 +290,8 @@ export default function OdrlEditor() {
 
   // Prohibition Block Handlers
   const addProhibitionBlock = () => {
-    const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+     const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+	//const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => typeof t === 'string' ? t.trim() !== '' : !!t);
     const newProhibition = {
 	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
@@ -347,50 +371,6 @@ export default function OdrlEditor() {
     prohibitions[prohibIdx].constraints = prohibitions[prohibIdx].constraints.filter((_, idx) => idx !== indexToRemove);
   });
 
-  const addAssignerConstraint = (permIdx) => modifyPermissions(permissions => {
-    if (!permissions[permIdx].assigner) return;
-    permissions[permIdx].assigner.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateAssignerConstraint = (permIdx, index, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].assigner.constraints[index][field] = value;
-  });
-  const deleteAssignerConstraint = (permIdx, indexToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].assigner.constraints = permissions[permIdx].assigner.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
-  const addProhibitionAssignerConstraint = (prohibIdx) => modifyProhibitions(prohibitions => {
-    if (!prohibitions[prohibIdx].assigner) return;
-    prohibitions[prohibIdx].assigner.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateProhibitionAssignerConstraint = (prohibIdx, index, field, value) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].assigner.constraints[index][field] = value;
-  });
-  const deleteProhibitionAssignerConstraint = (prohibIdx, indexToRemove) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].assigner.constraints = prohibitions[prohibIdx].assigner.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
-  const addActorConstraint = (permIdx) => modifyPermissions(permissions => {
-    if (!permissions[permIdx].actor) return;
-    permissions[permIdx].actor.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateActorConstraint = (permIdx, index, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].actor.constraints[index][field] = value;
-  });
-  const deleteActorConstraint = (permIdx, indexToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].actor.constraints = permissions[permIdx].actor.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
-  const addProhibitionActorConstraint = (prohibIdx) => modifyProhibitions(prohibitions => {
-    if (!prohibitions[prohibIdx].actor) return;
-    prohibitions[prohibIdx].actor.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateProhibitionActorConstraint = (prohibIdx, index, field, value) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].actor.constraints[index][field] = value;
-  });
-  const deleteProhibitionActorConstraint = (prohibIdx, indexToRemove) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].actor.constraints = prohibitions[prohibIdx].actor.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
   const addPurposeConstraint = (permIdx) => modifyPermissions(permissions => {
     if (!permissions[permIdx].purpose) return;
     permissions[permIdx].purpose.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
@@ -412,29 +392,6 @@ export default function OdrlEditor() {
   const deleteProhibitionPurposeConstraint = (prohibIdx, indexToRemove) => modifyProhibitions(prohibitions => {
     prohibitions[prohibIdx].purpose.constraints = prohibitions[prohibIdx].purpose.constraints.filter((_, idx) => idx !== indexToRemove);
   });
-
-  const addTargetConstraint = (permIdx) => modifyPermissions(permissions => {
-    if (!permissions[permIdx].target) return;
-    permissions[permIdx].target.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateTargetConstraint = (permIdx, index, field, value) => modifyPermissions(permissions => {
-    permissions[permIdx].target.constraints[index][field] = value;
-  });
-  const deleteTargetConstraint = (permIdx, indexToRemove) => modifyPermissions(permissions => {
-    permissions[permIdx].target.constraints = permissions[permIdx].target.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
-  const addProhibitionTargetConstraint = (prohibIdx) => modifyProhibitions(prohibitions => {
-    if (!prohibitions[prohibIdx].target) return;
-    prohibitions[prohibIdx].target.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
-  });
-  const updateProhibitionTargetConstraint = (prohibIdx, index, field, value) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].target.constraints[index][field] = value;
-  });
-  const deleteProhibitionTargetConstraint = (prohibIdx, indexToRemove) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].target.constraints = prohibitions[prohibIdx].target.constraints.filter((_, idx) => idx !== indexToRemove);
-  });
-
 
   // Assigner Block & Constraint Handlers
   const addAssignerBlock = (permIdx) => modifyPermissions(permissions => {
@@ -521,13 +478,15 @@ export default function OdrlEditor() {
     ? (policy.obligations && policy.obligations[activePermissionIdx.idx]) 
     : null;
 
-  const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+   const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+  //const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => typeof t === 'string' ? t.trim() !== '' : !!t);
   
   // ADDING OBLIGATION ELEMENTS HERE [TIDY IN FUTURE]
   
   // Obligation Block Handlers
   const addObligationBlock = () => {
-    const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+     const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
+	//const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => typeof t === 'string' ? t.trim() !== '' : !!t);
     const newObligation = {
 	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
@@ -811,6 +770,295 @@ export default function OdrlEditor() {
     items[activePermissionIdx.idx].uid = null;
     setPolicy({ ...policy, [targetKey]: items });
   };
+  
+  // Generalized helper to modify constraints across any active rule type (Permission, Prohibition, Obligation)
+  const modifyActiveRule = (updaterFn) => {
+    const activeType = activePermissionIdx.type;
+    const keyMap = { permission: 'permissions', prohibition: 'prohibitions', obligation: 'obligations' };
+    const targetKey = keyMap[activeType];
+    if (!targetKey) return;
+    const items = [...(policy[targetKey] || [])];
+    updaterFn(items[activePermissionIdx.idx]);
+    setPolicy({ ...policy, [targetKey]: items });
+  };
+
+  // --- Recursive Path-Based Constraint & Group Handlers ---
+
+  // --- Unified Constraint Container Helper ---
+  const getConstraintsContainer = (targetObj, containerType = 'rule') => {
+    switch (containerType) {
+      case 'action':
+	    if (!targetObj.action) targetObj.action = { name: '', constraints: [] };
+        if (!targetObj.action.constraints) targetObj.action.constraints = [];
+          return targetObj.action.constraints;
+      case 'dutyAction':
+        if (!targetObj.actionObj) targetObj.actionObj = { name: targetObj.action || '', constraints: [] };
+        if (!targetObj.actionObj.constraints) targetObj.actionObj.constraints = [];
+        return targetObj.actionObj.constraints;
+      case 'target':
+        if (!targetObj.target) targetObj.target = { name: '', constraints: [] };
+        if (!targetObj.target.constraints) targetObj.target.constraints = [];
+        return targetObj.target.constraints;
+      case 'assigner':
+	  case 'dutyAssigner':
+        if (!targetObj.assigner) targetObj.assigner = { type: 'Legal Entity', constraints: [] };
+        if (!targetObj.assigner.constraints) targetObj.assigner.constraints = [];
+        return targetObj.assigner.constraints;
+      case 'assignee':
+	  case 'dutyAssignee':
+        if (!targetObj.actor) targetObj.actor = { type: 'Legal Entity', constraints: [] };
+        if (!targetObj.actor.constraints) targetObj.actor.constraints = [];
+        return targetObj.actor.constraints;
+	  case 'duty': 
+        if (!targetObj.constraints) targetObj.constraints = [];
+        return targetObj.constraints;
+      case 'rule':
+      default:
+        if (!targetObj.constraints) targetObj.constraints = [];
+        return targetObj.constraints;
+    }
+  };
+
+  // --- Unified Constraint & Group Handlers ---
+
+  const addConstraintAt = (path = [], containerType = 'rule') => modifyActiveRule(rule => {
+    let curr = getConstraintsContainer(rule, containerType);
+    for (const idx of path) {
+      if (!curr[idx].constraints) curr[idx].constraints = [];
+      curr = curr[idx].constraints;
+    }
+    curr.push({
+      leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime',
+      operator: '<',
+      rightOperand: ''
+    });
+  });
+
+  const addGroupAt = (path = [], containerType = 'rule') => modifyActiveRule(rule => {
+    let curr = getConstraintsContainer(rule, containerType);
+    for (const idx of path) {
+      if (!curr[idx].constraints) curr[idx].constraints = [];
+      curr = curr[idx].constraints;
+    }
+    curr.push({
+      isGroup: true,
+      logicalOp: 'and',
+      constraints: []
+    });
+  });
+
+  const updateConstraintAt = (path = [], field, value, containerType = 'rule') => modifyActiveRule(rule => {
+    let curr = getConstraintsContainer(rule, containerType);
+    for (let i = 0; i < path.length - 1; i++) {
+      curr = curr[path[i]].constraints;
+    }
+    curr[path[path.length - 1]][field] = value;
+  });
+
+  const updateGroupOperandAt = (path = [], value, containerType = 'rule') => modifyActiveRule(rule => {
+    let curr = getConstraintsContainer(rule, containerType);
+    for (let i = 0; i < path.length - 1; i++) {
+      curr = curr[path[i]].constraints;
+    }
+    curr[path[path.length - 1]].logicalOp = value;
+  });
+
+  const deleteItemAt = (path = [], containerType = 'rule') => modifyActiveRule(rule => {
+    let curr = getConstraintsContainer(rule, containerType);
+    for (let i = 0; i < path.length - 1; i++) {
+      curr = curr[path[i]].constraints;
+    }
+    const targetIdx = path[path.length - 1];
+    curr.splice(targetIdx, 1); // Works universally for both root and nested arrays in-place
+  });
+  
+  // Helper builder for constraints / refinements mapping supporting nested logical groups
+  const buildConstraintsObj = (constraints) => {
+    if (!constraints || constraints.length === 0) return undefined;
+
+    return constraints.map(item => {
+      // Check both isGroup/logicalOp (editor state) and type === 'group'/operator
+      if (item.isGroup || item.type === 'group') {
+        const logicalOp = item.logicalOp || item.operator || 'and'; // 'and', 'or', 'xone', 'andSequence'
+        return {
+          "@type": "LogicalConstraint",
+          [logicalOp]: buildConstraintsObj(item.constraints) || []
+        };
+      } else {
+        return {
+          "@type": "Constraint",
+          "leftOperand": item.leftOperand,
+          "operator": item.operator,
+          "rightOperand": item.rightOperand
+        };
+      }
+    });
+  };
+  
+  // 1. General modifier wrapper
+  const modifyDutySubElementAt = (dutyIdx, subType, callback) => modifyDutyRule(rule => {
+    if (!rule.duties[dutyIdx]) return;
+    
+    // Ensure structure exists based on subType
+    if (subType === 'action' && !rule.duties[dutyIdx].actionObj) {
+      rule.duties[dutyIdx].actionObj = { name: rule.duties[dutyIdx].action || '', constraints: [] };
+    } else if (subType === 'assigner' && !rule.duties[dutyIdx].assigner) {
+      rule.duties[dutyIdx].assigner = { type: 'Legal Entity', constraints: [] };
+    } else if (subType === 'assignee' && !rule.duties[dutyIdx].actor) {
+      rule.duties[dutyIdx].actor = { type: 'Legal Entity', constraints: [] };
+	} else if (subType === 'duty') { 
+      if (!rule.duties[dutyIdx].constraints) rule.duties[dutyIdx].constraints = [];
+    }
+    
+    callback(rule.duties[dutyIdx]);
+  });
+
+  // 2. Add Constraint
+  const addDutyConstraintAt = (dutyIdx, subType, path = []) => modifyDutySubElementAt(dutyIdx, subType, (duty) => {
+    let curr = getConstraintsContainer(duty, subType);
+    for (const idx of path) {
+      if (!curr[idx].constraints) curr[idx].constraints = [];
+      curr = curr[idx].constraints;
+    }
+    curr.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+  });
+
+  // 3. Add Group
+  const addDutyGroupAt = (dutyIdx, subType, path = []) => modifyDutySubElementAt(dutyIdx, subType, (duty) => {
+    let curr = getConstraintsContainer(duty, subType);
+    for (const idx of path) {
+      if (!curr[idx].constraints) curr[idx].constraints = [];
+      curr = curr[idx].constraints;
+    }
+    curr.push({ isGroup: true, logicalOp: 'and', constraints: [] });
+  });
+
+  // 4. Update Constraint Field
+  const updateDutyConstraintAt = (dutyIdx, subType, path = [], field, value) => modifyDutySubElementAt(dutyIdx, subType, (duty) => {
+    let curr = getConstraintsContainer(duty, subType);
+    for (let i = 0; i < path.length - 1; i++) {
+      curr = curr[path[i]].constraints;
+    }
+    curr[path[path.length - 1]][field] = value;
+  });
+
+  // 5. Update Group Logical Operator (AND/OR)
+  const updateDutyGroupOperandAt = (dutyIdx, subType, path = [], value) => modifyDutySubElementAt(dutyIdx, subType, (duty) => {
+    let curr = getConstraintsContainer(duty, subType);
+    for (let i = 0; i < path.length - 1; i++) {
+      curr = curr[path[i]].constraints;
+    }
+    curr[path[path.length - 1]].logicalOp = value;
+  });
+
+  // 6. Delete Item (Constraint or Group)
+  const deleteDutyItemAt = (dutyIdx, subType, path = []) => modifyDutySubElementAt(dutyIdx, subType, (duty) => {
+    let curr = getConstraintsContainer(duty, subType);
+    for (let i = 0; i < path.length - 1; i++) {
+      curr = curr[path[i]].constraints;
+    }
+    curr.splice(path[path.length - 1], 1);
+  });
+  
+  // Recursive renderer for rule-level constraints and nested groups
+  // Recursive renderer for constraints and nested groups
+  const renderConstraintsList = (
+    items, 
+    parentPath = [], 
+    onAddConstraint,
+    onAddGroup,
+    onUpdateConstraint,
+    onUpdateGroupOp,
+    onDeleteItem
+  ) => {
+    if (!items || items.length === 0) {
+      return <div className="text-[11px] text-slate-400 italic py-1">Empty logical constraint group.</div>;
+    }
+
+    return items.map((item, idx) => {
+      const currentPath = [...parentPath, idx];
+      const labelPrefix = currentPath.map(p => p + 1).join('.');
+
+      if (item.isGroup) {
+        return (
+          <div key={idx} className="flex flex-col gap-2 p-2.5 bg-slate-100 border border-slate-300 rounded-md w-full my-1">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-600">Logical Operand:</span>
+                <select 
+                  className="border p-1 rounded text-xs bg-white font-medium"
+                  value={item.logicalOp || 'and'}
+                  onChange={(e) => onUpdateGroupOp(currentPath, e.target.value)}
+                >
+                  <option value="and">AND</option>
+                  <option value="or">OR</option>
+                  <option value="xone">XONE</option>
+                  <option value="andSequence">AND SEQUENCE</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => onAddConstraint(currentPath)}
+                  className="text-[10px] bg-blue-50 border border-blue-200 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 font-medium"
+                >
+                  + Add Constraint
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => onAddGroup(currentPath)}
+                  className="text-[10px] bg-blue-50 border border-blue-200 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 font-medium"
+                >
+                  + Add Nested Group
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => onDeleteItem(currentPath)} 
+                  className="text-red-500 hover:text-red-700 text-xs font-bold px-1"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Recursive Sub-constraints Container */}
+            <div className="flex flex-col gap-2 pl-3 sm:pl-4 border-l-2 border-slate-400 mt-1 overflow-x-auto">
+              {renderConstraintsList(item.constraints, currentPath, onAddConstraint, onAddGroup, onUpdateConstraint, onUpdateGroupOp, onDeleteItem)}
+            </div>
+          </div>
+        );
+      }
+
+      // Standard leaf constraint row
+      return (
+        <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+          <span className="text-xs text-slate-400 w-12 shrink-0">C{labelPrefix}:</span>
+          {renderLeftOperandSelect(
+            item.leftOperand, 
+            (e) => onUpdateConstraint(currentPath, 'leftOperand', e.target.value), 
+            dbLeftOperands
+          )}
+          {renderOperatorSelect(
+            item.operator, 
+            (e) => onUpdateConstraint(currentPath, 'operator', e.target.value), 
+            dbOperators
+          )}
+          {renderRightOperandInput(
+            item.rightOperand, 
+            (e) => onUpdateConstraint(currentPath, 'rightOperand', e.target.value)
+          )}
+          <button 
+            type="button" 
+            onClick={() => onDeleteItem(currentPath)} 
+            className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+      );
+    });
+  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 font-sans text-sm text-slate-800 relative w-full min-w-[1280px]">
@@ -871,10 +1119,10 @@ export default function OdrlEditor() {
       </header>
 
       {/* Main Workspace */}
-      <main className="flex flex-1 overflow-hidden p-4 gap-4 relative">
+      <main className="flex flex-1 overflow-hidden p-4 gap-4 relative w-full h-full">
         
         {/* Left Panel: Metadata & SHACL */}
-        <div className="w-1/4 flex flex-col gap-4 overflow-hidden h-full">
+        <div className="w-full lg:w-3/12 xl:w-1/4 flex flex-col gap-4 overflow-hidden h-full shrink-0">
           <section className="bg-white rounded-lg p-4 shadow flex flex-col gap-4 border border-slate-200 overflow-y-auto flex-1 min-h-0">
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2">Policy Metadata</h2>
             
@@ -983,6 +1231,7 @@ export default function OdrlEditor() {
                   {policy.targets.map((tgt, idx) => (
                     <div key={idx} className="flex gap-2 items-center w-full min-w-0">
                       <input type="text" className="border p-1.5 rounded text-xs bg-white font-mono min-w-0 flex-1" placeholder="Target asset URI / filename" value={tgt} onChange={(e) => updateMetadataTarget(idx, e.target.value)} />
+						  {/* // <input type="text" className="border p-1.5 rounded text-xs bg-white font-mono min-w-0 flex-1" placeholder="Target asset URI / filename" value={typeof tgt === 'string' ? tgt : (tgt.source || tgt.uid || '')} onChange={(e) => updateMetadataTarget(idx, e.target.value)} /> */}
                       <button type="button" onClick={() => removeMetadataTarget(idx)} className="text-rose-500 hover:text-rose-700 font-bold text-xs px-1 shrink-0">✕</button>
                     </div>
                   ))}
@@ -1012,7 +1261,7 @@ export default function OdrlEditor() {
         </div>
 
         {/* Center Panel: Rule Builder & Rule Tabs */}
-        <div className="w-1/2 flex flex-col gap-4 overflow-hidden h-full">
+        <div className="flex-1 flex flex-col gap-4 overflow-hidden h-full min-w-[400px]">
           <section className="bg-white rounded-lg p-4 shadow overflow-y-auto border border-slate-200 flex-1 flex flex-col gap-4 relative">
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2">Rule Builder</h2>
             
@@ -1046,15 +1295,9 @@ export default function OdrlEditor() {
 
                 const addAssigner = isPerm ? () => addAssignerBlock(idxObj.idx) : isProhib ? () => addProhibitionAssignerBlock(idxObj.idx) : () => addObligationAssignerBlock(idxObj.idx);
                 const removeAssigner = isPerm ? () => removeAssignerBlock(idxObj.idx) : isProhib ? () => removeProhibitionAssignerBlock(idxObj.idx) : () => removeObligationAssignerBlock(idxObj.idx);
-                const addAssignerConstraintFn = isPerm ? () => addAssignerConstraint(idxObj.idx) : isProhib ? () => addProhibitionAssignerConstraint(idxObj.idx) : () => addObligationAssignerConstraint(idxObj.idx);
-                const updateAssignerConstraintFn = isPerm ? updateAssignerConstraint : isProhib ? updateProhibitionAssignerConstraint : updateObligationAssignerConstraint;
-                const deleteAssignerConstraintFn = isPerm ? deleteAssignerConstraint : isProhib ? deleteProhibitionAssignerConstraint : deleteObligationAssignerConstraint;
 
                 const addActor = isPerm ? () => addActorBlock(idxObj.idx) : isProhib ? () => addProhibitionActorBlock(idxObj.idx) : () => addObligationActorBlock(idxObj.idx);
                 const removeActor = isPerm ? () => removeActorBlock(idxObj.idx) : isProhib ? () => removeProhibitionActorBlock(idxObj.idx) : () => removeObligationActorBlock(idxObj.idx);
-                const addActorConstraintFn = isPerm ? () => addActorConstraint(idxObj.idx) : isProhib ? () => addProhibitionActorConstraint(idxObj.idx) : () => addObligationActorConstraint(idxObj.idx);
-                const updateActorConstraintFn = isPerm ? updateActorConstraint : isProhib ? updateProhibitionActorConstraint : updateObligationActorConstraint;
-                const deleteActorConstraintFn = isPerm ? deleteActorConstraint : isProhib ? deleteProhibitionActorConstraint : deleteObligationActorConstraint;
 
                 const addPurpose = isPerm ? () => addPurposeBlock(idxObj.idx) : isProhib ? () => addProhibitionPurposeBlock(idxObj.idx) : () => addObligationPurposeBlock(idxObj.idx);
                 const removePurpose = isPerm ? () => removePurposeBlock(idxObj.idx) : isProhib ? () => removeProhibitionPurposeBlock(idxObj.idx) : () => removeObligationPurposeBlock(idxObj.idx);
@@ -1064,13 +1307,7 @@ export default function OdrlEditor() {
 
                 const addTarget = isPerm ? () => addTargetBlock(idxObj.idx) : isProhib ? () => addProhibitionTargetBlock(idxObj.idx) : () => addObligationTargetBlock(idxObj.idx);
                 const removeTarget = isPerm ? () => removeTargetBlock(idxObj.idx) : isProhib ? () => removeProhibitionTargetBlock(idxObj.idx) : () => removeObligationTargetBlock(idxObj.idx);
-                const addTargetConstraintFn = isPerm ? () => addTargetConstraint(idxObj.idx) : isProhib ? () => addProhibitionTargetConstraint(idxObj.idx) : () => addObligationTargetConstraint(idxObj.idx);
-                const updateTargetConstraintFn = isPerm ? updateTargetConstraint : isProhib ? updateProhibitionTargetConstraint : updateObligationTargetConstraint;
-                const deleteTargetConstraintFn = isPerm ? deleteTargetConstraint : isProhib ? deleteProhibitionTargetConstraint : deleteObligationTargetConstraint;
-
-                const addActionConstraintFn = isPerm ? () => addActionConstraint(idxObj.idx) : isProhib ? () => addProhibitionActionConstraint(idxObj.idx) : () => addObligationActionConstraint(idxObj.idx);
-                const updateActionConstraintFn = isPerm ? updateActionConstraint : isProhib ? updateProhibitionActionConstraint : updateObligationActionConstraint;
-                const deleteActionConstraintFn = isPerm ? deleteActionConstraint : isProhib ? deleteProhibitionActionConstraint : deleteObligationActionConstraint;
+                
 
                 return (
                   <div className="border border-slate-300 rounded-lg p-4 bg-slate-50 flex flex-col gap-4 relative">
@@ -1080,7 +1317,6 @@ export default function OdrlEditor() {
                       <div className="flex flex-col gap-1.5 flex-1 pr-6">
                         <span className={`font-bold ${badgeColorClass}`}>🔒 EDITING: {ruleTypeLabel} #{idxObj.idx + 1}</span>
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={addConstraint} className="text-xs bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 font-medium">+ Add Rule Constraint</button>
                           {!activeRule.assigner && <button onClick={addAssigner} className="text-xs bg-slate-600 text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assigner</button>}
                           {!activeRule.actor && <button onClick={addActor} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assignee</button>}
                           {!activeRule.purpose && <button onClick={addPurpose} className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Purpose</button>}
@@ -1122,12 +1358,28 @@ export default function OdrlEditor() {
                     <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
                       <div className="flex justify-between items-center">
                         <label className="text-xs font-bold uppercase text-blue-600">{actionLabel}</label>
-                        <button onClick={addActionConstraintFn} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium">+ Add Action Refinement</button>
+                        <div className="flex gap-2">
+                          <button 
+                            type="button" 
+                            onClick={() => addConstraintAt([], 'action')}
+                            className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                          >
+                            + Add Constraint
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => addGroupAt([], 'action')}
+                            className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                          >
+                            + Add Nested Group
+                          </button>
+                        </div>
                       </div>
           
                       <select className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" value={activeRule.action?.name || ''} onChange={(e) => {
                         const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
                         const items = [...policy[listKey]];
+                        if (!items[idxObj.idx].action) items[idxObj.idx].action = { name: '', constraints: [] };
                         items[idxObj.idx].action.name = e.target.value;
                         setPolicy({...policy, [listKey]: items});
                       }}>
@@ -1137,19 +1389,17 @@ export default function OdrlEditor() {
                         ))}
                       </select>
 
-                      {activeRule.action?.constraints?.length > 0 && (
-                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-blue-400 mt-1 w-full min-w-0">
-                          {activeRule.action.constraints.map((constraint, idx) => (
-                            <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                              <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                              {renderLeftOperandSelect(constraint.leftOperand, (e) => updateActionConstraintFn(idxObj.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                              {renderOperatorSelect(constraint.operator, (e) => updateActionConstraintFn(idxObj.idx, idx, 'operator', e.target.value), dbOperators)}
-                              {renderRightOperandInput(constraint.rightOperand, (e) => updateActionConstraintFn(idxObj.idx, idx, 'rightOperand', e.target.value))}
-                              <button type="button" onClick={() => deleteActionConstraintFn(idxObj.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <div className="flex flex-col gap-2 pl-3 border-l-2 border-blue-400 mt-1 w-full min-w-0">
+                        {renderConstraintsList(
+                          activeRule.action?.constraints || [], 
+                          [], 
+                          (path) => addConstraintAt(path, 'action'),
+                          (path) => addGroupAt(path, 'action'),
+                          (path, field, val) => updateConstraintAt(path, field, val, 'action'),
+                          (path, val) => updateGroupOperandAt(path, val, 'action'),
+                          (path) => deleteItemAt(path, 'action')
+                        )}
+                      </div>
                     </div>
 
                     {/* Assigner Block */}
@@ -1158,7 +1408,20 @@ export default function OdrlEditor() {
                         <div className="flex justify-between items-center">
                           <label className="text-xs font-bold uppercase text-slate-600">Assigner</label>
                           <div className="flex items-center gap-2">
-                            <button onClick={addAssignerConstraintFn} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Assigner Constraint</button>
+                            <button 
+                              type="button" 
+                              onClick={() => addConstraintAt([], 'assigner')}
+                              className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                            >
+                              + Add Constraint
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => addGroupAt([], 'assigner')}
+                              className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                            >
+                              + Add Nested Group
+                            </button>
                             <button type="button" onClick={removeAssigner} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
                           </div>
                         </div>
@@ -1173,29 +1436,41 @@ export default function OdrlEditor() {
                           <option value="Organisational Unit">Organisational Unit</option>
                         </select>
 
-                        {activeRule.assigner.constraints?.length > 0 && (
-                          <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
-                            {activeRule.assigner.constraints.map((constraint, idx) => (
-                              <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                                <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                {renderLeftOperandSelect(constraint.leftOperand, (e) => updateAssignerConstraintFn(idxObj.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                {renderOperatorSelect(constraint.operator, (e) => updateAssignerConstraintFn(idxObj.idx, idx, 'operator', e.target.value), dbOperators)}
-                                {renderRightOperandInput(constraint.rightOperand, (e) => updateAssignerConstraintFn(idxObj.idx, idx, 'rightOperand', e.target.value))}
-                                <button type="button" onClick={() => deleteAssignerConstraintFn(idxObj.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
+                          {renderConstraintsList(
+                            activeRule.assigner?.constraints || [], 
+                            [], 
+                            (path) => addConstraintAt(path, 'assigner'),
+                            (path) => addGroupAt(path, 'assigner'),
+                            (path, field, val) => updateConstraintAt(path, field, val, 'assigner'),
+                            (path, val) => updateGroupOperandAt(path, val, 'assigner'),
+                            (path) => deleteItemAt(path, 'assigner')
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {/* Actor / Assignee Block */}
-                    {activeRule.actor && (
+					
+					{activeRule.actor && (
                       <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
                         <div className="flex justify-between items-center">
-                          <label className="text-xs font-bold uppercase text-indigo-600">Assignee</label>
+                          <label className="text-xs font-bold uppercase text-slate-600">Assignee</label>
                           <div className="flex items-center gap-2">
-                            <button onClick={addActorConstraintFn} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Assignee Constraint</button>
+                            <button 
+                              type="button" 
+                              onClick={() => addConstraintAt([], 'assignee')}
+                              className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                            >
+                              + Add Constraint
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => addGroupAt([], 'assignee')}
+                              className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                            >
+                              + Add Nested Group
+                            </button>
                             <button type="button" onClick={removeActor} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
                           </div>
                         </div>
@@ -1210,19 +1485,17 @@ export default function OdrlEditor() {
                           <option value="Organisational Unit">Organisational Unit</option>
                         </select>
 
-                        {activeRule.actor.constraints?.length > 0 && (
-                          <div className="flex flex-col gap-2 pl-3 border-l-2 border-indigo-400 mt-1 w-full min-w-0">
-                           {activeRule.actor.constraints.map((constraint, idx) => (
-                              <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                                <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                {renderLeftOperandSelect(constraint.leftOperand, (e) => updateActorConstraintFn(idxObj.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                {renderOperatorSelect(constraint.operator, (e) => updateActorConstraintFn(idxObj.idx, idx, 'operator', e.target.value), dbOperators)}
-                                {renderRightOperandInput(constraint.rightOperand, (e) => updateActorConstraintFn(idxObj.idx, idx, 'rightOperand', e.target.value))}
-                                <button type="button" onClick={() => deleteActorConstraintFn(idxObj.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
+                          {renderConstraintsList(
+                            activeRule.actor?.constraints || [], 
+                            [], 
+                            (path) => addConstraintAt(path, 'assignee'),
+                            (path) => addGroupAt(path, 'assignee'),
+                            (path, field, val) => updateConstraintAt(path, field, val, 'assignee'),
+                            (path, val) => updateGroupOperandAt(path, val, 'assignee'),
+                            (path) => deleteItemAt(path, 'assignee')
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -1271,50 +1544,88 @@ export default function OdrlEditor() {
                         <div className="flex justify-between items-center">
                           <label className="text-xs font-bold uppercase text-emerald-600">Target Asset</label>
                           <div className="flex items-center gap-2">
-                            <button onClick={addTargetConstraintFn} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors text-slate-600 font-medium">+ Add Target Constraint</button>
+                            <button 
+                              type="button" 
+                              onClick={() => addConstraintAt([], 'target')}
+                              className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                            >
+                              + Add Constraint
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => addGroupAt([], 'target')}
+                              className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                            >
+                              + Add Nested Group
+                            </button>
                             {hasGlobalTargets && (
                               <button type="button" onClick={removeTarget} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
                             )}
                           </div>
                         </div>
-                        <input type="text" placeholder="Target name or URI" className="w-full border p-1.5 rounded text-xs bg-white font-mono" value={activeRule.target?.name || ''} onChange={(e) => {
-                          const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
-                          const items = [...policy[listKey]];
-                          if (!items[idxObj.idx].target) items[idxObj.idx].target = { name: '', constraints: [] };
-                          items[idxObj.idx].target.name = e.target.value;
-                          setPolicy({...policy, [listKey]: items});
-                        }}/>
+    
+                        <input 
+                          type="text" 
+                          placeholder="Target name or URI" 
+                          className="w-full border p-1.5 rounded text-xs bg-white font-mono" 
+                          value={activeRule.target?.name || ''} 
+                          onChange={(e) => {
+                            const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                            const items = [...policy[listKey]];
+                            if (!items[idxObj.idx].target) items[idxObj.idx].target = { name: '', constraints: [] };
+                            items[idxObj.idx].target.name = e.target.value;
+                            setPolicy({...policy, [listKey]: items});
+                          }}
+                        />
 
-                        {activeRule.target?.constraints?.length > 0 && (
-                          <div className="flex flex-col gap-2 pl-3 border-l-2 border-emerald-400 mt-1 w-full min-w-0">
-                            {activeRule.target.constraints.map((constraint, idx) => (
-                              <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                                <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                {renderLeftOperandSelect(constraint.leftOperand, (e) => updateTargetConstraintFn(idxObj.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                {renderOperatorSelect(constraint.operator, (e) => updateTargetConstraintFn(idxObj.idx, idx, 'operator', e.target.value), dbOperators)}
-                                {renderRightOperandInput(constraint.rightOperand, (e) => updateTargetConstraintFn(idxObj.idx, idx, 'rightOperand', e.target.value))}
-                                <button type="button" onClick={() => deleteTargetConstraintFn(idxObj.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-emerald-400 mt-1 w-full min-w-0">
+                          {renderConstraintsList(
+                           activeRule.target?.constraints || [], 
+                           [], 
+                            (path) => addConstraintAt(path, 'target'),
+                            (path) => addGroupAt(path, 'target'),
+                            (path, field, val) => updateConstraintAt(path, field, val, 'target'),
+                            (path, val) => updateGroupOperandAt(path, val, 'target'),
+                            (path) => deleteItemAt(path, 'target')
+                          )}
+                        </div>
                       </div>
                     )}
 
-                    {/* Global Rule Constraints */}
+                    {/* Rule Level Constraints */}
                     <div>
-                      <label className="block text-xs font-bold uppercase text-slate-500 mb-2">Global Rule Constraints</label>
-                      <div className={`flex flex-col gap-2 pl-3 border-l-2 ${borderAccentClass} w-full min-w-0`}>
-                        {activeRule.constraints?.map((constraint, idx) => (
-                          <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                            <span className="text-xs text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                            {renderLeftOperandSelect(constraint.leftOperand, (e) => updateConstraint(idxObj.idx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                            {renderOperatorSelect(constraint.operator, (e) => updateConstraint(idxObj.idx, idx, 'operator', e.target.value), dbOperators)}
-                            {renderRightOperandInput(constraint.rightOperand, (e) => updateConstraint(idxObj.idx, idx, 'rightOperand', e.target.value))}
-                            <button type="button" onClick={() => deleteConstraint(idxObj.idx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                          </div>
-                        ))}
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="text-xs font-bold uppercase text-slate-500">Rule Level Constraints</label>
+                        <div className="flex gap-2">
+                          <button 
+                            type="button" 
+                            onClick={() => addConstraintAt([], 'rule')}
+                            className="text-[10px] bg-white border border-slate-300 px-2 py-0.5 rounded hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 font-medium"
+                          >
+                            + Add Constraint
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => addGroupAt([], 'rule')}
+                            className="text-[10px] bg-white border border-slate-300 px-2 py-0.5 rounded hover:bg-slate-100 transition-colors cursor-pointer text-slate-700 font-medium"
+                          >
+                            + Add Nested Group
+                          </button>
+                        </div>
                       </div>
+					  
+					  <div className={`flex flex-col gap-2 pl-3 border-l-2 ${borderAccentClass} w-full min-w-0`}>
+                        {renderConstraintsList(
+                          activeRule.constraints || [],
+                          [],
+                          (path) => addConstraintAt(path, 'rule'),
+                          (path) => addGroupAt(path, 'rule'),
+                          (path, field, val) => updateConstraintAt(path, field, val, 'rule'),
+                          (path, val) => updateGroupOperandAt(path, val, 'rule'),
+                          (path) => deleteItemAt(path, 'rule')
+                        )}
+                      </div>
+                      
                     </div>
 
                     {/* Duties Block */}
@@ -1326,7 +1637,7 @@ export default function OdrlEditor() {
                               {isProhib ? `🛡️ Remedy Block #${dutyIdx + 1}` : isOblig ? `🛡️ Consequence Block #${dutyIdx + 1}`: `🛡️ Duty Block #${dutyIdx + 1}`}
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              <button onClick={() => addDutyConstraint(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Constraint</button>
+                              
                               {!dutyBlock.assigner && <button onClick={() => addDutyAssigner(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Assigner</button>}
                               {!dutyBlock.actor && <button onClick={() => addDutyActor(dutyIdx)} className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm">+ Add Assignee</button>}
 							  {isPerm && (
@@ -1337,11 +1648,28 @@ export default function OdrlEditor() {
                           <button type="button" onClick={() => removeDutyBlock(dutyIdx)} className="text-amber-700 hover:text-amber-900 font-bold text-md leading-none p-1 rounded hover:bg-amber-100 transition-all cursor-pointer shrink-0">✕</button>
                         </div>
             
+                        {/* Action Block */}
                         <div className="bg-white p-3 border border-amber-200 rounded-lg shadow-xs flex flex-col gap-3">
                           <div className="flex justify-between items-center">
                             <label className="text-[11px] font-bold uppercase text-amber-900">Action</label>
-                            <button onClick={() => addDutyActionConstraint(dutyIdx)} className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium">+ Add Action Refinement</button>
+                            <div className="flex gap-2">
+                              <button 
+                                type="button" 
+                                onClick={() => addDutyConstraintAt(dutyIdx, "dutyAction", [])}
+                                className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                              >
+                                + Add Constraint
+                              </button>
+                              <button 
+                                type="button" 
+                                onClick={() => addDutyGroupAt(dutyIdx, "dutyAction", [])}
+                                className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                              >
+                                + Add Nested Group
+                              </button>
+                            </div>
                           </div>
+
                           <select 
                             className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
                             value={dutyBlock.action || ''} 
@@ -1353,36 +1681,18 @@ export default function OdrlEditor() {
                             ))}
                           </select>
 
-                          {dutyBlock.actionObj?.constraints?.length > 0 && (
-                            <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
-                              {dutyBlock.actionObj.constraints.map((constraint, idx) => (
-                                <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                                  <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                  {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyActionConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                  {renderOperatorSelect(constraint.operator, (e) => updateDutyActionConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                                  {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyActionConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
-                                  <button type="button" onClick={() => deleteDutyActionConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-						
-						{/* Duty Constraints */}
-                        {dutyBlock.constraints?.length > 0 && (
                           <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
-                            <label className="text-[10px] font-bold uppercase text-amber-900">Duty Constraints</label>
-                           {dutyBlock.constraints.map((constraint, idx) => (
-                             <div key={idx} className="flex gap-2 items-center w-full min-w-0">
-                               <span className="text-[11px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                               {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                               {renderOperatorSelect(constraint.operator, (e) => updateDutyConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                               {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
-                               <button type="button" onClick={() => deleteDutyConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1 shrink-0">✕</button>
-                             </div>
-                           ))}
+                            {renderConstraintsList(
+                                dutyBlock.actionObj?.constraints || [], 
+                                [], 
+                                (path) => addDutyConstraintAt(dutyIdx, 'dutyAction', path),
+                                (path) => addDutyGroupAt(dutyIdx, 'dutyAction', path),
+                                (path, field, val) => updateDutyConstraintAt(dutyIdx, 'dutyAction', path, field, val),
+                                (path, val) => updateDutyGroupOperandAt(dutyIdx, 'dutyAction', path, val),
+                                (path) => deleteDutyItemAt(dutyIdx, 'dutyAction', path)
+                            )}
                           </div>
-                        )}
+                        </div>
 
                         {/* Duty Assigner Subblock */}
                         {dutyBlock.assigner && (
@@ -1390,35 +1700,49 @@ export default function OdrlEditor() {
                             <div className="flex justify-between items-center">
                               <label className="text-[11px] font-bold uppercase text-slate-600">Assigner</label>
                               <div className="flex items-center gap-2">
-                                <button onClick={() => addDutyAssignerConstraint(dutyIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
-                                <button type="button" onClick={() => removeDutyAssigner(dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => addDutyConstraintAt(dutyIdx, "dutyAssigner", [])}
+                                  className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                                >
+                                  + Add Constraint
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => addDutyGroupAt(dutyIdx, "dutyAssigner", [])}
+                                  className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                                >
+                                  + Add Nested Group
+                                </button>
+								<button type="button" onClick={() => removeDutyAssigner(dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
                               </div>
                             </div>
-                            <select className="w-full border p-1 rounded text-xs bg-white font-medium" value={dutyBlock.assigner.type} onChange={(e) => {
-                              // const listKey = isPerm ? 'permissions' : 'prohibitions';
-							  const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
-                              const items = [...policy[listKey]];
-                              items[idxObj.idx].duties[dutyIdx].assigner.type = e.target.value;
-                              setPolicy({...policy, [listKey]: items});
-                            }}>
+                            <select 
+							  className="w-full border p-1 rounded text-xs bg-white font-medium" 
+							  value={dutyBlock.assigner.type} 
+							  onChange={(e) => {
+                                // const listKey = isPerm ? 'permissions' : 'prohibitions';
+							    const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                                const items = [...policy[listKey]];
+                                items[idxObj.idx].duties[dutyIdx].assigner.type = e.target.value;
+                                setPolicy({...policy, [listKey]: items});
+                              }}>
                               <option value="Legal Entity">Legal Entity</option>
                               <option value="Natural Person">Natural Person</option>
                               <option value="Organisational Unit">Organisational Unit</option>
                             </select>
 
-                            {dutyBlock.assigner.constraints?.length > 0 && (
-                              <div className="flex flex-col gap-1.5 pl-2 border-l-2 border-slate-400 mt-1 w-full min-w-0">
-                                {dutyBlock.assigner.constraints.map((constraint, idx) => (
-                                  <div key={idx} className="flex gap-1.5 items-center w-full min-w-0">
-                                    <span className="text-[10px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                    {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyAssignerConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                    {renderOperatorSelect(constraint.operator, (e) => updateDutyAssignerConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                                    {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyAssignerConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
-                                    <button type="button" onClick={() => deleteDutyAssignerConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
+                              {renderConstraintsList(
+                                dutyBlock.assigner?.constraints || [], 
+                                [], 
+                                (path) => addDutyConstraintAt(dutyIdx, 'dutyAssigner', path),
+                                (path) => addDutyGroupAt(dutyIdx, 'dutyAssigner', path),
+                                (path, field, val) => updateDutyConstraintAt(dutyIdx, 'dutyAssigner', path, field, val),
+                                (path, val) => updateDutyGroupOperandAt(dutyIdx, 'dutyAssigner', path, val),
+                                (path) => deleteDutyItemAt(dutyIdx, 'dutyAssigner', path)
+                              )}
+							</div>
                           </div>
                         )}
 
@@ -1426,39 +1750,88 @@ export default function OdrlEditor() {
                         {dutyBlock.actor && (
                           <div className="bg-white p-2.5 border border-amber-200 rounded-md shadow-xs flex flex-col gap-2">
                             <div className="flex justify-between items-center">
-                              <label className="text-[11px] font-bold uppercase text-indigo-600">Assignee</label>
+                              <label className="text-[11px] font-bold uppercase text-slate-600">Assignee</label>
                               <div className="flex items-center gap-2">
-                                <button onClick={() => addDutyActorConstraint(dutyIdx)} className="text-[9px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded hover:bg-slate-200 text-slate-600 font-medium">+ Add Refinement</button>
-                                <button type="button" onClick={() => removeDutyActor(dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => addDutyConstraintAt(dutyIdx, "dutyAssignee", [])}
+                                  className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                                >
+                                  + Add Constraint
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => addDutyGroupAt(dutyIdx, "dutyAssignee", [])}
+                                  className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer text-slate-600 font-medium"
+                                >
+                                  + Add Nested Group
+                                </button>
+								<button type="button" onClick={() => removeDutyActor(dutyIdx)} className="text-red-500 hover:text-red-700 text-xs font-bold px-0.5">✕</button>
                               </div>
                             </div>
-                            <select className="w-full border p-1 rounded text-xs bg-white font-medium" value={dutyBlock.actor.type} onChange={(e) => {
-                              // const listKey = isPerm ? 'permissions' : 'prohibitions';
-							  const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
-                              const items = [...policy[listKey]];
-                              items[idxObj.idx].duties[dutyIdx].actor.type = e.target.value;
-                              setPolicy({...policy, [listKey]: items});
-                            }}>
+                            <select 
+							  className="w-full border p-1 rounded text-xs bg-white font-medium" 
+							  value={dutyBlock.actor.type} 
+							  onChange={(e) => {
+                                // const listKey = isPerm ? 'permissions' : 'prohibitions';
+							    const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                                const items = [...policy[listKey]];
+                                items[idxObj.idx].duties[dutyIdx].actor.type = e.target.value;
+                                setPolicy({...policy, [listKey]: items});
+                              }}>
                               <option value="Legal Entity">Legal Entity</option>
                               <option value="Natural Person">Natural Person</option>
                               <option value="Organisational Unit">Organisational Unit</option>
                             </select>
 
-                            {dutyBlock.actor.constraints?.length > 0 && (
-                              <div className="flex flex-col gap-1.5 pl-2 border-l-2 border-indigo-400 mt-1 w-full min-w-0">
-                                {dutyBlock.actor.constraints.map((constraint, idx) => (
-                                  <div key={idx} className="flex gap-1.5 items-center w-full min-w-0">
-                                    <span className="text-[10px] text-slate-400 w-8 shrink-0">C{idx+1}:</span>
-                                    {renderLeftOperandSelect(constraint.leftOperand, (e) => updateDutyActorConstraint(dutyIdx, idx, 'leftOperand', e.target.value), dbLeftOperands)}
-                                    {renderOperatorSelect(constraint.operator, (e) => updateDutyActorConstraint(dutyIdx, idx, 'operator', e.target.value), dbOperators)}
-                                    {renderRightOperandInput(constraint.rightOperand, (e) => updateDutyActorConstraint(dutyIdx, idx, 'rightOperand', e.target.value))}
-                                    <button type="button" onClick={() => deleteDutyActorConstraint(dutyIdx, idx)} className="text-red-500 hover:text-red-700 text-xs font-bold shrink-0">✕</button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
+                              {renderConstraintsList(
+                                dutyBlock.actor?.constraints || [], 
+                                [], 
+                                (path) => addDutyConstraintAt(dutyIdx, 'dutyAssignee', path),
+                                (path) => addDutyGroupAt(dutyIdx, 'dutyAssignee', path),
+                                (path, field, val) => updateDutyConstraintAt(dutyIdx, 'dutyAssignee', path, field, val),
+                                (path, val) => updateDutyGroupOperandAt(dutyIdx, 'dutyAssignee', path, val),
+                                (path) => deleteDutyItemAt(dutyIdx, 'dutyAssignee', path)
+                              )}
+							</div>
                           </div>
                         )}
+						
+						{/* Duty Level Constraints (Moved below Action, Assigner, and Assignee blocks) */}
+                        <div className="flex flex-col gap-2 mt-1">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-bold uppercase text-amber-900">DUTY LEVEL CONSTRAINTS</label>
+                            <div className="flex gap-2">
+                              <button 
+                                type="button" 
+                                onClick={() => addDutyConstraintAt(dutyIdx, 'duty', [])} 
+                                className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm"
+                              >
+                                + Add Constraint
+                              </button>
+                              <button 
+                                type="button" 
+                                onClick={() => addDutyGroupAt(dutyIdx, 'duty', [])} 
+                                className="text-[10px] bg-white border border-amber-200 text-amber-900 px-2 py-0.5 rounded hover:bg-amber-100 transition-colors font-medium shadow-sm"
+                              >
+                                + Add Nested Group
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
+                            {renderConstraintsList(
+                              dutyBlock.constraints || [], 
+                              [], 
+                              (path) => addDutyConstraintAt(dutyIdx, 'duty', path),
+                              (path) => addDutyGroupAt(dutyIdx, 'duty', path),
+                              (path, field, val) => updateDutyConstraintAt(dutyIdx, 'duty', path, field, val),
+                              (path, val) => updateDutyGroupOperandAt(dutyIdx, 'duty', path, val),
+                              (path) => deleteDutyItemAt(dutyIdx, 'duty', path)
+                            )}
+                          </div>
+                        </div>
 						
 						{/* Duty Consequences Subblock */}
                         {dutyBlock.consequences?.length > 0 && (
@@ -1545,7 +1918,7 @@ export default function OdrlEditor() {
         </div>
 
         {/* Right Panel: Human Summary & JSON-LD / TTL Output */}
-        <section className="w-1/4 flex flex-col gap-4 overflow-hidden h-full">
+        <section className="w-full lg:w-3/12 xl:w-1/4 flex flex-col gap-4 overflow-hidden h-full shrink-0">
           <HumanSummaryPanel policy={policy} activePermissionIdx={activePermissionIdx} />
 
           <div className="h-2/3 bg-white rounded-lg p-4 shadow border border-slate-200 flex flex-col">

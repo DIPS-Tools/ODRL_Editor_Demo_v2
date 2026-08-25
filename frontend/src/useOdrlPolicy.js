@@ -90,15 +90,26 @@ export function useOdrlPolicy() {
     fetchGraphVocabularies();
   }, []);
 
-  // Helper builder for constraints / refinements mapping
+  // Helper builder for constraints / refinements mapping supporting nested logical groups
   const buildConstraintsObj = (constraints) => {
     if (!constraints || constraints.length === 0) return undefined;
-    return constraints.map(c => ({
-      "@type": "Constraint",
-      "leftOperand": c.leftOperand,
-      "operator": c.operator,
-      "rightOperand": c.rightOperand
-    }));
+  
+    return constraints.map(item => {
+      if (item.isGroup || item.type === 'group') {
+        const logicalOp = item.logicalOp || item.operator || 'and'; // 'and', 'or', 'xone', 'andSequence'
+        return {
+          "@type": "LogicalConstraint",
+          [logicalOp]: buildConstraintsObj(item.constraints) || []
+        };
+      } else {
+        return {
+          "@type": "Constraint",
+          "leftOperand": item.leftOperand,
+          "operator": item.operator,
+          "rightOperand": item.rightOperand
+        };
+      }
+    });
   };
 
   // Compile policy state into JSON-LD whenever policy data changes
