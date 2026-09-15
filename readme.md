@@ -1,7 +1,7 @@
 # ODRL Editor
 
 PLEASE NOTE: The ODRL Editor is currently is in proof of concept. 
-The functionality will be changing rapidly through to the end of August 2026
+The functionality will be changing rapidly through to the end of October 2026
 
 You can access a live demo version of the current functionalities at [DIPS](https://dips.soton.ac.uk/odrl-editor-demo). 
 
