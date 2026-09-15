@@ -4,6 +4,15 @@ import { renderLeftOperandSelect, renderOperatorSelect, renderRightOperandInput 
 import HumanSummaryPanel from './components/HumanSummaryPanel';
 
 export default function OdrlEditor() {
+	
+  // State for editor settings menu
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [editorSettings, setEditorSettings] = useState({
+    domainOnlyLeftOperands: false, // Default value
+	dutyButton: true, // Default value
+	customUris: [],               // <--- Array to hold custom URIs
+  });
+  
   const {
     activePermissionIdx, setActivePermissionIdx,
     showVocabModal, setShowVocabModal,
@@ -13,11 +22,17 @@ export default function OdrlEditor() {
     shaclResult, showShaclReport, setShowShaclReport,
     serverFiles, showDropdown, setShowDropdown,
     dbActions, dbPurposes, dbLeftOperands, dbOperators,
-    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl
-  } = useOdrlPolicy();
+    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl,
+    fetchGraphVocabularies
+	// NEXT { editorSettings }
+  } = useOdrlPolicy({ customUris: editorSettings.customUris });
+  
+  
 
-  // State for feature under development modal
-  const [showDevModal, setShowDevModal] = useState(false);
+  // Getter function to access settings anywhere in the editor code later
+  const getEditorSetting = (settingKey) => {
+    return editorSettings[settingKey];
+  };
   
   // State for magnifying glass floating modal
   const [showMagnifyModal, setShowMagnifyModal] = useState(false);
@@ -62,6 +77,138 @@ export default function OdrlEditor() {
     }
   };
   
+  // --- Iframe Communication & Handshake ---
+  React.useEffect(() => {
+    // 1. Check if running inside an iframe and send MSG_READY
+    if (window.self !== window.top) {
+      window.parent.postMessage({ type: 'MSG_READY' }, '*');
+    }
+
+    // 2. Register message listener for MSG_INITIATE
+    const handleMessage = (event) => {
+      const message = event.data;
+      if (message && message.type === 'MSG_INITIATE' && message.policy) {
+        try {
+          const parsedJson = message.policy;
+        
+          // Target parsing with prefix/URI fallback (reusing handleUploadPolicyFile logic)
+          const rawTargetMain = getRawField(parsedJson, ['target', 'odrl:target', 'http://www.w3.org/ns/odrl/2/target']);
+          const newTargets = parseTargets(rawTargetMain);
+        
+          const parseRule = (p) => {
+            const rawAction = getRawField(p, ['action', 'odrl:action', 'http://www.w3.org/ns/odrl/2/action']);
+            const rawAssigner = getRawField(p, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
+            const rawAssignee = getRawField(p, ['assignee', 'actor', 'odrl:assignee', 'odrl:actor', 'http://www.w3.org/ns/odrl/2/assignee']);
+            const rawPurpose = getRawField(p, ['purpose', 'odrl:purpose', 'http://www.w3.org/ns/odrl/2/purpose']);
+            const rawTarget = getRawField(p, ['target', 'odrl:target', 'http://www.w3.org/ns/odrl/2/target']);
+          
+            return {
+              uid: getRawField(p, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']),
+              action: { 
+                name: typeof rawAction === 'string' ? rawAction : (rawAction?.rdfValue || rawAction?.["@id"] || rawAction?.["odrl:rdfValue"] || ''), 
+                constraints: parseConstraints(rawAction) 
+              },
+              assigner: rawAssigner ? { 
+                type: parsePartyType(rawAssigner), 
+                constraints: parseConstraints(rawAssigner) 
+              } : null,
+              actor: rawAssignee ? { 
+                type: parsePartyType(rawAssignee), 
+                constraints: parseConstraints(rawAssignee) 
+              } : null,
+              purpose: rawPurpose ? {
+                name: typeof rawPurpose === 'string' ? rawPurpose : (rawPurpose?.["@id"] || rawPurpose?.rdfValue || rawPurpose?.["odrl:rdfValue"] || ''),
+                constraints: parseConstraints(rawPurpose)
+              } : null,
+              target: rawTarget ? { 
+                name: typeof rawTarget === 'string' 
+                  ? rawTarget 
+                  : (Array.isArray(rawTarget.source) ? rawTarget.source.join(', ') : rawTarget.source || rawTarget?.["@id"] || rawTarget?.rdfValue || rawTarget?.id || ''), 
+                constraints: parseConstraints(rawTarget) 
+              } : null,
+              constraints: parseConstraints(p),
+              duties: (() => {
+                const rawDuty = getRawField(p, ['duty', 'remedy', 'consequence', 'odrl:duty', 'odrl:remedy', 'odrl:consequence', 'http://www.w3.org/ns/odrl/2/duty']);
+                if (!rawDuty) return [];
+                const dutyList = Array.isArray(rawDuty) ? rawDuty : [rawDuty];
+                return dutyList.map(d => {
+                  const dAction = getRawField(d, ['action', 'odrl:action', 'http://www.w3.org/ns/odrl/2/action']);
+                  const dAssigner = getRawField(d, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
+                  const dAssignee = getRawField(d, ['assignee', 'actor', 'odrl:assignee', 'odrl:actor', 'http://www.w3.org/ns/odrl/2/assignee']);
+                
+                  return {
+                    action: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''),
+                    actionObj: { 
+                      name: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''), 
+                      constraints: parseConstraints(dAction) 
+                    },
+                    assigner: dAssigner ? { 
+                      type: parsePartyType(dAssigner), 
+                      constraints: parseConstraints(dAssigner) 
+                    } : null,
+                    actor: dAssignee ? { 
+                      type: parsePartyType(dAssignee), 
+                      constraints: parseConstraints(dAssignee) 
+                    } : null,
+                    constraints: parseConstraints(d),
+                    consequences: (() => {
+                      const rawCons = getRawField(d, ['consequence', 'odrl:consequence', 'http://www.w3.org/ns/odrl/2/consequence']);
+                      if (!rawCons) return [];
+                      const consList = Array.isArray(rawCons) ? rawCons : [rawCons];
+                      return consList.map(c => {
+                        const cAction = getRawField(c, ['action', 'odrl:action', 'http://www.w3.org/ns/odrl/2/action']);
+                        return {
+                          action: typeof cAction === 'string' ? cAction : (cAction?.rdfValue || cAction?.["@id"] || cAction?.["odrl:rdfValue"] || ''),
+                          constraints: parseConstraints(c)
+                        };
+                      });
+                    })()
+                  };
+                });
+              })()
+            };
+          };
+
+          const rawPerms = getRawField(parsedJson, ['permission', 'odrl:permission', 'odrl:Permission', 'http://www.w3.org/ns/odrl/2/permission']);
+          const newPermissions = (rawPerms ? (Array.isArray(rawPerms) ? rawPerms : [rawPerms]) : []).map(parseRule);
+
+          const rawProhs = getRawField(parsedJson, ['prohibition', 'odrl:prohibition', 'odrl:Prohibition', 'http://www.w3.org/ns/odrl/2/prohibition']);
+          const newProhibitions = (rawProhs ? (Array.isArray(rawProhs) ? rawProhs : [rawProhs]) : []).map(parseRule);
+
+          const rawObligs = getRawField(parsedJson, ['obligation', 'odrl:obligation', 'odrl:Obligation', 'http://www.w3.org/ns/odrl/2/obligation']);
+          const newObligations = (rawObligs ? (Array.isArray(rawObligs) ? rawObligs : [rawObligs]) : []).map(parseRule);
+
+          setPolicy({
+            type: parsedJson["@type"] || parsedJson["odrl:type"] || 'Set',
+            uid: getRawField(parsedJson, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']) || '',
+            profile: parsedJson.profile || parsedJson["odrl:profile"] || '',
+            assigner: (() => {
+              const val = getRawField(parsedJson, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
+              if (!val) return null;
+              return typeof val === 'object' ? val : { "@id": val };
+            })(),
+            assignee: (() => {
+              const val = getRawField(parsedJson, ['assignee', 'odrl:assignee', 'http://www.w3.org/ns/odrl/2/assignee']);
+              if (!val) return null;
+              return typeof val === 'object' ? val : { "@id": val };
+            })(),
+            conflict: parsedJson.conflict || parsedJson["odrl:conflict"] || null,
+            targets: newTargets,
+            permissions: newPermissions,
+            prohibitions: newProhibitions,
+            obligations: newObligations
+          });
+          setActivePermissionIdx({ type: 'permission', idx: 0 });
+        } catch (err) {
+          console.error("Failed to parse policy received via postMessage:", err);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+  
   // Automatically fetch TTL when JSON-LD updates or when TTL view format is selected
   React.useEffect(() => {
     if (codeViewFormat === 'TTL' && jsonLd) {
@@ -70,6 +217,32 @@ export default function OdrlEditor() {
       });
     }
   }, [jsonLd, codeViewFormat]);
+  
+  React.useEffect(() => {
+    const resetVocabs = async () => {
+      try {
+        const response = await fetch('api/vocabularies/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profiles: policy.profile })
+        });
+		
+		if (response.ok) {
+          // Refresh the dropdown lists from the backend after resetting profiles
+          //if (typeof fetchServerFiles === 'function') {
+            fetchServerFiles();
+          //}
+          // If you have a separate function to fetch vocabularies/dropdown options, call it here too:
+           fetchGraphVocabularies();
+        }
+		
+      } catch (e) {
+        console.error("Failed to update server vocabularies:", e);
+      }
+    };
+	
+    resetVocabs();
+  }, [policy.profile]);
 
   // Handler for downloading the current policy as a .json file
   const handleDownloadPolicy = () => {
@@ -99,18 +272,31 @@ export default function OdrlEditor() {
         constraints: c[logicalOp].map(subC => parseSingleConstraintItem(subC))
       };
     } else {
+      const rawLeft = c["odrl:leftOperand"] || c.leftOperand;
+      const rawOp = c["odrl:Operator"] || c["odrl:operator"] || c.operator;
+
       return {
-        leftOperand: c.leftOperand || '',
-        operator: c.operator || '',
-        rightOperand: c.rightOperand || ''
+        leftOperand: typeof rawLeft === 'object' && rawLeft !== null 
+          ? (rawLeft["@id"] || rawLeft.id || '') 
+          : (rawLeft || ''),
+        
+        operator: typeof rawOp === 'object' && rawOp !== null 
+          ? (rawOp["@id"] || rawOp.id || '') 
+          : (rawOp || ''),
+          
+        rightOperand: c["odrl:rightOperand"] || c.rightOperand || ''
       };
     }
   };
 
   // Helper to parse constraints or refinements from any ODRL entity object/array
   const parseConstraints = (obj) => {
-    const raw = obj?.constraint || obj?.refinement;
+	if (!obj) return [];
+    const raw = getRawField(obj, ['constraint', 'refinement', 'odrl:constraint', 'odrl:refinement', 'http://www.w3.org/ns/odrl/2/constraint', 'http://www.w3.org/ns/odrl/2/refinement']);
     if (!raw) return [];
+	
+    //const raw = obj?.constraint || obj?.refinement;
+    //if (!raw) return [];
     const rawList = Array.isArray(raw) ? raw : [raw];
     const parsed = [];
 
@@ -123,9 +309,9 @@ export default function OdrlEditor() {
   
   // Helper function to safely extract the party type whether it's a string or an object
   const parsePartyType = (val) => {
-    if (!val) return 'Legal Entity';
+    if (!val) return 'https://w3id.org/dpv/owl#LegalEntity';
     if (typeof val === 'string') return val;
-    return val.type || val["@type"] || 'Legal Entity';
+    return val["@id"] || val.id || val.type || val["@type"] || 'https://w3id.org/dpv/owl#LegalEntity';
   };
   
   // Robustly parse policy-level targets (supporting AssetCollections, strings, or arrays)
@@ -149,6 +335,15 @@ export default function OdrlEditor() {
     return extracted;
   };
   
+  // Helper to check standard, prefixed, or full URI keys interchangeably
+  const getRawField = (obj, fieldNames) => {
+    if (!obj) return null;
+    for (const name of fieldNames) {
+      if (obj[name] !== undefined) return obj[name];
+    }
+    return null;
+  };
+  
   // Handler for uploading and parsing a local policy .json file into the editor
   const handleUploadPolicyFile = (event) => {
     const file = event.target.files?.[0];
@@ -160,79 +355,120 @@ export default function OdrlEditor() {
         const content = e.target?.result;
         if (typeof content === 'string') {
           const parsedJson = JSON.parse(content);
-          
-          const newTargets = parseTargets(parsedJson.target);
-          
+        
+          // 1) Target parsing with prefix/URI fallback
+          const rawTargetMain = getRawField(parsedJson, ['target', 'odrl:target', 'http://www.w3.org/ns/odrl/2/target']);
+          const newTargets = parseTargets(rawTargetMain);
+        
           // Unified parser for Permissions, Prohibitions, and Obligations
-          const parseRule = (p) => ({
-			uid: p.uid || p["@id"] || null, // Added UID parsing
-            // 1) Refinements for an action
-            action: { 
-              name: typeof p.action === 'string' ? p.action : (p.action?.rdfValue || p.action?.["@id"] || ''), 
-              constraints: parseConstraints(p.action) 
-            },
-            assigner: p.assigner ? { 
-              type: parsePartyType(p.assigner), 
-              constraints: parseConstraints(p.assigner) 
-            } : null,
-
-            actor: p.assignee ? { 
-              type: parsePartyType(p.assignee), 
-              constraints: parseConstraints(p.assignee) 
-            } : null,
-            purpose: p.purpose ? {
-              name: typeof p.purpose === 'string' ? p.purpose : (p.purpose?.["@id"] || p.purpose?.rdfValue || ''),
-              constraints: parseConstraints(p.purpose)
-            } : null,
-			
-            // 2) Any data about the target (URI/name + constraints)
-            // Updated target parser to check for "source"
-            target: p.target ? { 
-              name: typeof p.target === 'string' 
-                ? p.target 
-                : (Array.isArray(p.target.source) ? p.target.source.join(', ') : p.target.source || p.target?.["@id"] || p.target?.rdfValue || p.target?.id || ''), 
-              constraints: parseConstraints(p.target) 
-            } : null,
-			
-            // 4) All rule level constraints
-            constraints: parseConstraints(p),
-            duties: (p.duty || p.remedy || p.consequence) ? (Array.isArray(p.duty || p.remedy || p.consequence) ? (p.duty || p.remedy || p.consequence) : [p.duty || p.remedy] || p.consequence).map(d => ({
-              action: typeof d.action === 'string' ? d.action : (d.action?.rdfValue || d.action?.["@id"] || ''),
-              // 5) Duty actions constraints
-              actionObj: { 
-                name: typeof d.action === 'string' ? d.action : (d.action?.rdfValue || d.action?.["@id"] || ''), 
-                constraints: parseConstraints(d.action) 
+          const parseRule = (p) => {
+            const rawAction = getRawField(p, ['action', 'odrl:action', 'http://www.w3.org/ns/odrl/2/action']);
+            const rawAssigner = getRawField(p, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
+            const rawAssignee = getRawField(p, ['assignee', 'actor', 'odrl:assignee', 'odrl:actor', 'http://www.w3.org/ns/odrl/2/assignee']);
+            const rawPurpose = getRawField(p, ['purpose', 'odrl:purpose', 'http://www.w3.org/ns/odrl/2/purpose']);
+            const rawTarget = getRawField(p, ['target', 'odrl:target', 'http://www.w3.org/ns/odrl/2/target']);
+          
+            return {
+              uid: getRawField(p, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']),
+            
+              // Action & action constraints with fallbacks
+              action: { 
+                name: typeof rawAction === 'string' ? rawAction : (rawAction?.rdfValue || rawAction?.["@id"] || rawAction?.["odrl:rdfValue"] || ''), 
+                constraints: parseConstraints(rawAction) 
               },
-			  
-              assigner: d.assigner ? { 
-                type: parsePartyType(d.assigner), 
-                constraints: parseConstraints(d.assigner) 
+            
+              assigner: rawAssigner ? { 
+                type: parsePartyType(rawAssigner), 
+                constraints: parseConstraints(rawAssigner) 
               } : null,
 
-              actor: (d.assignee || d.actor) ? { 
-                type: parsePartyType(d.assignee || d.actor), 
-                constraints: parseConstraints(d.assignee || d.actor) 
+              actor: rawAssignee ? { 
+                type: parsePartyType(rawAssignee), 
+                constraints: parseConstraints(rawAssignee) 
               } : null,
-			  
-              constraints: parseConstraints(d),
-              consequences: d.consequence ? (Array.isArray(d.consequence) ? d.consequence : [d.consequence]).map(c => ({
-                action: typeof c.action === 'string' ? c.action : (c.action?.rdfValue || c.action?.["@id"] || ''),
-                constraints: parseConstraints(c)
-              })) : []
-            })) : []
-          });
+            
+              purpose: rawPurpose ? {
+                name: typeof rawPurpose === 'string' ? rawPurpose : (rawPurpose?.["@id"] || rawPurpose?.rdfValue || rawPurpose?.["odrl:rdfValue"] || ''),
+                constraints: parseConstraints(rawPurpose)
+              } : null,
+            
+              target: rawTarget ? { 
+                name: typeof rawTarget === 'string' 
+                  ? rawTarget 
+                  : (Array.isArray(rawTarget.source) ? rawTarget.source.join(', ') : rawTarget.source || rawTarget?.["@id"] || rawTarget?.rdfValue || rawTarget?.id || ''), 
+                constraints: parseConstraints(rawTarget) 
+              } : null,
+            
+              // Rule-level constraints with fallback detection
+              constraints: parseConstraints(p),
+            
+              duties: (() => {
+                const rawDuty = getRawField(p, ['duty', 'remedy', 'consequence', 'odrl:duty', 'odrl:remedy', 'odrl:consequence', 'http://www.w3.org/ns/odrl/2/duty']);
+                if (!rawDuty) return [];
+                const dutyList = Array.isArray(rawDuty) ? rawDuty : [rawDuty];
+                return dutyList.map(d => {
+                  const dAction = getRawField(d, ['action', 'odrl:action', 'http://www.w3.org/ns/odrl/2/action']);
+                  const dAssigner = getRawField(d, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
+                  const dAssignee = getRawField(d, ['assignee', 'actor', 'odrl:assignee', 'odrl:actor', 'http://www.w3.org/ns/odrl/2/assignee']);
+                
+                  return {
+                    action: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''),
+                    actionObj: { 
+                      name: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''), 
+                      constraints: parseConstraints(dAction) 
+                    },
+                    assigner: dAssigner ? { 
+                      type: parsePartyType(dAssigner), 
+                      constraints: parseConstraints(dAssigner) 
+                    } : null,
+                    actor: dAssignee ? { 
+                      type: parsePartyType(dAssignee), 
+                      constraints: parseConstraints(dAssignee) 
+                    } : null,
+                    constraints: parseConstraints(d),
+                    consequences: (() => {
+                      const rawCons = getRawField(d, ['consequence', 'odrl:consequence', 'http://www.w3.org/ns/odrl/2/consequence']);
+                      if (!rawCons) return [];
+                      const consList = Array.isArray(rawCons) ? rawCons : [rawCons];
+                      return consList.map(c => {
+                        const cAction = getRawField(c, ['action', 'odrl:action', 'http://www.w3.org/ns/odrl/2/action']);
+                        return {
+                          action: typeof cAction === 'string' ? cAction : (cAction?.rdfValue || cAction?.["@id"] || cAction?.["odrl:rdfValue"] || ''),
+                          constraints: parseConstraints(c)
+                        };
+                      });
+                    })()
+                  };
+                });
+              })()
+            };
+          };
 
-          const newPermissions = (parsedJson.permission ? (Array.isArray(parsedJson.permission) ? parsedJson.permission : [parsedJson.permission]) : []).map(parseRule);
-          const newProhibitions = (parsedJson.prohibition ? (Array.isArray(parsedJson.prohibition) ? parsedJson.prohibition : [parsedJson.prohibition]) : []).map(parseRule);
-          const newObligations = (parsedJson.obligation ? (Array.isArray(parsedJson.obligation) ? parsedJson.obligation : [parsedJson.obligation]) : []).map(parseRule);
+          // 2) Detect permissions, prohibitions, and obligations with fallback keys
+          const rawPerms = getRawField(parsedJson, ['permission', 'odrl:permission', 'odrl:Permission', 'http://www.w3.org/ns/odrl/2/permission']);
+          const newPermissions = (rawPerms ? (Array.isArray(rawPerms) ? rawPerms : [rawPerms]) : []).map(parseRule);
+
+          const rawProhs = getRawField(parsedJson, ['prohibition', 'odrl:prohibition', 'odrl:Prohibition', 'http://www.w3.org/ns/odrl/2/prohibition']);
+          const newProhibitions = (rawProhs ? (Array.isArray(rawProhs) ? rawProhs : [rawProhs]) : []).map(parseRule);
+
+          const rawObligs = getRawField(parsedJson, ['obligation', 'odrl:obligation', 'odrl:Obligation', 'http://www.w3.org/ns/odrl/2/obligation']);
+          const newObligations = (rawObligs ? (Array.isArray(rawObligs) ? rawObligs : [rawObligs]) : []).map(parseRule);
 
           setPolicy({
-            type: parsedJson["@type"] || 'Set',
-            uid: parsedJson.uid || parsedJson["@id"] || '',
-            profile: parsedJson.profile || '',
-            assigner: parsedJson.assigner || null,
-            assignee: parsedJson.assignee || null,
-            conflict: parsedJson.conflict || null,
+            type: parsedJson["@type"] || parsedJson["odrl:type"] || 'Set',
+            uid: getRawField(parsedJson, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']) || '',
+            profile: parsedJson.profile || parsedJson["odrl:profile"] || '',
+            assigner: (() => {
+              const val = getRawField(parsedJson, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
+              if (!val) return null;
+              return typeof val === 'object' ? val : { "@id": val };
+            })(),
+            assignee: (() => {
+              const val = getRawField(parsedJson, ['assignee', 'odrl:assignee', 'http://www.w3.org/ns/odrl/2/assignee']);
+              if (!val) return null;
+              return typeof val === 'object' ? val : { "@id": val };
+            })(),
+            conflict: parsedJson.conflict || parsedJson["odrl:conflict"] || null,
             targets: newTargets,
             permissions: newPermissions,
             prohibitions: newProhibitions,
@@ -258,6 +494,18 @@ export default function OdrlEditor() {
     setPolicy({ ...policy, targets });
   };
   const removeMetadataTarget = (indexToRemove) => setPolicy({ ...policy, targets: policy.targets.filter((_, idx) => idx !== indexToRemove) });
+  
+  // Policy Metadata Profile Handlers
+  const addMetadataProfile = () => setPolicy({ ...policy, profile: [...(Array.isArray(policy.profile) ? policy.profile : policy.profile ? [policy.profile] : []), ''] });
+  const updateMetadataProfile = (index, value) => {
+    const profiles = Array.isArray(policy.profile) ? [...policy.profile] : [policy.profile || ''];
+    profiles[index] = value;
+    setPolicy({ ...policy, profile: profiles });
+  };
+  const removeMetadataProfile = (indexToRemove) => {
+    const profiles = Array.isArray(policy.profile) ? policy.profile.filter((_, idx) => idx !== indexToRemove) : [];
+    setPolicy({ ...policy, profile: profiles.length === 1 ? profiles[0] : profiles });
+  };
 
   // Permission Block Handlers
   const addPermissionBlock = () => {
@@ -295,7 +543,8 @@ export default function OdrlEditor() {
     const newProhibition = {
 	  uid: null, // Initialized as null
       action: { name: '', constraints: [] },
-      assigner: null, actor: null,
+      assigner: { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] }, 
+	  actor: { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] },
       purpose: null,
       target: hasGlobalTargets ? null : { name: '', constraints: [] },
       constraints: [],
@@ -332,7 +581,7 @@ export default function OdrlEditor() {
 
   // Specific constraint handlers mapped to common abstractions
   const addActionConstraint = (permIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].action.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
+    permissions[permIdx].action.constraints.push({ leftOperand: '-- Select Value --', operator: '-- Select Value --', rightOperand: '' });
   });
   const updateActionConstraint = (permIdx, index, field, value) => modifyPermissions(permissions => {
     permissions[permIdx].action.constraints[index][field] = value;
@@ -342,7 +591,7 @@ export default function OdrlEditor() {
   });
 
   const addProhibitionActionConstraint = (prohibIdx) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].action.constraints.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime', operator: '<', rightOperand: '' });
+    prohibitions[prohibIdx].action.constraints.push({ leftOperand: '-- Select Value --', operator: '-- Select Value --', rightOperand: '' });
   });
   const updateProhibitionActionConstraint = (prohibIdx, index, field, value) => modifyProhibitions(prohibitions => {
     prohibitions[prohibIdx].action.constraints[index][field] = value;
@@ -395,14 +644,14 @@ export default function OdrlEditor() {
 
   // Assigner Block & Constraint Handlers
   const addAssignerBlock = (permIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].assigner = { type: 'Legal Entity', constraints: [] };
+    permissions[permIdx].assigner = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeAssignerBlock = (permIdx) => modifyPermissions(permissions => {
     permissions[permIdx].assigner = null;
   });
 
   const addProhibitionAssignerBlock = (prohibIdx) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].assigner = { type: 'Legal Entity', constraints: [] };
+    prohibitions[prohibIdx].assigner = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeProhibitionAssignerBlock = (prohibIdx) => modifyProhibitions(prohibitions => {
     prohibitions[prohibIdx].assigner = null;
@@ -410,14 +659,14 @@ export default function OdrlEditor() {
 
   // Actor (Assignee) Block & Constraint Handlers
   const addActorBlock = (permIdx) => modifyPermissions(permissions => {
-    permissions[permIdx].actor = { type: 'Legal Entity', constraints: [] };
+    permissions[permIdx].actor = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeActorBlock = (permIdx) => modifyPermissions(permissions => {
     permissions[permIdx].actor = null;
   });
 
   const addProhibitionActorBlock = (prohibIdx) => modifyProhibitions(prohibitions => {
-    prohibitions[prohibIdx].actor = { type: 'Legal Entity', constraints: [] };
+    prohibitions[prohibIdx].actor = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeProhibitionActorBlock = (prohibIdx) => modifyProhibitions(prohibitions => {
     prohibitions[prohibIdx].actor = null;
@@ -480,6 +729,9 @@ export default function OdrlEditor() {
 
    const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => t.trim() !== '');
   //const hasGlobalTargets = policy.targets && policy.targets.length > 0 && policy.targets.some(t => typeof t === 'string' ? t.trim() !== '' : !!t);
+  
+  // Normalize the type for comparison (e.g., "odrl:Agreement" -> "Agreement") 
+  const normalizedType = policy.type?.replace(/^odrl:/, '');
   
   // ADDING OBLIGATION ELEMENTS HERE [TIDY IN FUTURE]
   
@@ -587,14 +839,14 @@ export default function OdrlEditor() {
   });
 
   const addObligationAssignerBlock = (oblIdx) => modifyObligations(obligations => {
-    obligations[oblIdx].assigner = { type: 'Legal Entity', constraints: [] };
+    obligations[oblIdx].assigner = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeObligationAssignerBlock = (oblIdx) => modifyObligations(obligations => {
     obligations[oblIdx].assigner = null;
   });
 
   const addObligationActorBlock = (oblIdx) => modifyObligations(obligations => {
-    obligations[oblIdx].actor = { type: 'Legal Entity', constraints: [] };
+    obligations[oblIdx].actor = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeObligationActorBlock = (oblIdx) => modifyObligations(obligations => {
     obligations[oblIdx].actor = null;
@@ -681,14 +933,14 @@ export default function OdrlEditor() {
 
   // Duty Assigner / Actor Sub-handlers
   const addDutyAssigner = (dutyIdx) => modifyDutyRule(rule => {
-    rule.duties[dutyIdx].assigner = { type: 'Legal Entity', constraints: [] };
+    rule.duties[dutyIdx].assigner = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeDutyAssigner = (dutyIdx) => modifyDutyRule(rule => {
     rule.duties[dutyIdx].assigner = null;
   });
 
   const addDutyActor = (dutyIdx) => modifyDutyRule(rule => {
-    rule.duties[dutyIdx].actor = { type: 'Legal Entity', constraints: [] };
+    rule.duties[dutyIdx].actor = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
   });
   const removeDutyActor = (dutyIdx) => modifyDutyRule(rule => {
     rule.duties[dutyIdx].actor = null;
@@ -801,12 +1053,12 @@ export default function OdrlEditor() {
         return targetObj.target.constraints;
       case 'assigner':
 	  case 'dutyAssigner':
-        if (!targetObj.assigner) targetObj.assigner = { type: 'Legal Entity', constraints: [] };
+        if (!targetObj.assigner) targetObj.assigner = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
         if (!targetObj.assigner.constraints) targetObj.assigner.constraints = [];
         return targetObj.assigner.constraints;
       case 'assignee':
 	  case 'dutyAssignee':
-        if (!targetObj.actor) targetObj.actor = { type: 'Legal Entity', constraints: [] };
+        if (!targetObj.actor) targetObj.actor = { type: 'https://w3id.org/dpv/owl#LegalEntity', constraints: [] };
         if (!targetObj.actor.constraints) targetObj.actor.constraints = [];
         return targetObj.actor.constraints;
 	  case 'duty': 
@@ -828,8 +1080,8 @@ export default function OdrlEditor() {
       curr = curr[idx].constraints;
     }
     curr.push({
-      leftOperand: 'http://www.w3.org/ns/odrl/2/dateTime',
-      operator: '<',
+      leftOperand: '-- Select Value --',
+      operator: '-- Select Value --',
       rightOperand: ''
     });
   });
@@ -886,10 +1138,10 @@ export default function OdrlEditor() {
         };
       } else {
         return {
-          "@type": "Constraint",
-          "leftOperand": item.leftOperand,
-          "operator": item.operator,
-          "rightOperand": item.rightOperand
+          "@type": "odrl:Constraint",
+          "odrl:leftOperand": { "@id": item.leftOperand},
+          "odrl:operator": { "@id": item.operator},
+          "odrl:rightOperand": item.rightOperand
         };
       }
     });
@@ -920,7 +1172,7 @@ export default function OdrlEditor() {
       if (!curr[idx].constraints) curr[idx].constraints = [];
       curr = curr[idx].constraints;
     }
-    curr.push({ leftOperand: 'http://www.w3.org/ns/odrl/2/spatial', operator: '=', rightOperand: '' });
+    curr.push({ leftOperand: '-- Select Value --', operator: '-- Select Value --', rightOperand: '' });
   });
 
   // 3. Add Group
@@ -1059,12 +1311,36 @@ export default function OdrlEditor() {
       );
     });
   };
+  
+  // Handler for publishing policy and notifying parent frame
+  const handlePublishClick = () => {
+    // 1. Call original publish function if available
+    //if (typeof handlePublish === 'function') {
+    //  handlePublish();
+    //}
+
+    // 2. Send MSG_FINALIZE message to parent window if inside an iframe
+    if (window.self !== window.top) {
+      try {
+        const policyObj = JSON.parse(jsonLd);
+        window.parent.postMessage({
+          type: 'MSG_FINALIZE',
+          policy: policyObj
+        }, '*');
+      } catch (err) {
+        window.parent.postMessage({
+          type: 'MSG_FINALIZE',
+          policy: jsonLd
+        }, '*');
+      }
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 font-sans text-sm text-slate-800 relative w-full min-w-[1280px]">
       
       {/* Header Toolbar */}
-      <header className="bg-slate-600 text-white pt-1.5 pb-1 px-2 flex justify-between items-end shadow-xs z-30">
+      <header className="bg-slate-600 text-white pt-1.5 pb-1 px-2 flex justify-between items-end shadow-xs z-30 relative">
         <div className="flex flex-col items-start leading-none">
           <h1 className="font-bold tracking-wide text-[8px] uppercase mb-1">ODRL Editor</h1>
           <div className="flex gap-2 items-center text-slate-800">
@@ -1115,7 +1391,124 @@ export default function OdrlEditor() {
             </button>
           </div>
         </div>
-        <span className="text-[10px] bg-slate-700/60 px-1.5 py-0.5 rounded text-slate-200 font-mono leading-tight">{policy.uid || 'New Unsaved Policy'}</span>
+		
+        {/* Right side of header banner: UID + Settings Cog Button */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] bg-slate-700/60 px-1.5 py-0.5 rounded text-slate-200 font-mono leading-tight">
+            {policy.uid || 'New Unsaved Policy'}
+          </span>
+		</div>
+
+        {/* Settings Cog Menu */}
+        <div className="absolute top-2 right-2 inline-block text-left text-slate-800 z-40">
+          <button 
+            onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
+            title="Editor Settings"
+            className="bg-slate-700 hover:bg-slate-500 text-white font-semibold text-x1 py-2 px-3.5 rounded-lg flex items-center justify-center transition-colors cursor-pointer border border-slate-400 shadow-xs leading-tight"
+          >
+            ⚙️
+          </button>
+
+          {showSettingsDropdown && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowSettingsDropdown(false)} />
+              <div className="absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-slate-100 focus:outline-none z-50 animate-in fade-in duration-100 text-slate-800">
+                <div className="p-2 bg-slate-50 text-[11px] font-bold tracking-wider uppercase text-slate-400 border-b">
+                    Editor Settings
+                </div>
+                <div className="p-2 flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer select-none text-slate-700 hover:text-slate-900">
+                    <input 
+                      type="checkbox" 
+                      checked={editorSettings.domainOnlyLeftOperands} 
+                      onChange={(e) => setEditorSettings({
+                        ...editorSettings, 
+                        domainOnlyLeftOperands: e.target.checked
+                      })}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                    />
+                    Domain only left operands
+                  </label>
+				  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer select-none text-slate-700 hover:text-slate-900">
+                    <input 
+                      type="checkbox" 
+                      checked={editorSettings.dutyButton} 
+                      onChange={(e) => setEditorSettings({
+                        ...editorSettings, 
+                        dutyButton: e.target.checked
+                      })}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                    />
+                    Duty Button
+                  </label>
+				  
+				  {/* --- Custom URIs Management Section --- */}
+                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-200">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold uppercase text-slate-600">JSON-LD Contexts</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setEditorSettings({
+                          ...editorSettings, 
+                          customUris: [...(editorSettings.customUris || []), { prefix: '', uri: '' }]
+                        })}
+                        className="text-[10px] bg-blue-50 border border-blue-200 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 font-medium"
+                      >
+                        + Add URI
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                      {(!editorSettings.customUris || editorSettings.customUris.length === 0) ? (
+                        <span className="text-[11px] text-slate-400 italic">No custom URIs added.</span>
+                      ) : (
+                        editorSettings.customUris.map((item, idx) => (
+                          <div key={idx} className="flex gap-1.5 items-center">
+						    {/* Left text box: Short width for prefix definition */}
+                            <input 
+                              type="text" 
+                              className="border p-1 rounded text-xs bg-white font-mono w-16 shrink-0" 
+                              placeholder="prefix" 
+                              value={item.prefix || ''} 
+                              onChange={(e) => {
+                                const newUris = [...editorSettings.customUris];
+                                newUris[idx] = { ...newUris[idx], prefix: e.target.value };
+                                setEditorSettings({ ...editorSettings, customUris: newUris });
+                             }}
+                            />
+                            <input 
+                              type="text" 
+                              className="border p-1 rounded text-xs bg-white font-mono flex-1" 
+                              placeholder="https://example.com/uri" 
+                              value={item.uri || ''} 
+                              onChange={(e) => {
+                                const newUris = [...editorSettings.customUris];
+                                newUris[idx] = { ...newUris[idx], uri: e.target.value };
+                                setEditorSettings({ ...editorSettings, customUris: newUris });
+                              }}
+                            />
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                const newUris = editorSettings.customUris.filter((_, i) => i !== idx);
+                                setEditorSettings({ ...editorSettings, customUris: newUris });
+                              }}
+                              className="text-red-500 hover:text-red-700 text-xs font-bold px-1"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  {/* ------------------------------------- */}
+                </div>
+              </div>
+            </>
+          )}
+        </div>	
+		
       </header>
 
       {/* Main Workspace */}
@@ -1129,9 +1522,10 @@ export default function OdrlEditor() {
             <div>
               <label className="block font-semibold mb-1">Policy Type</label>
               <select className="w-full border p-2 rounded bg-white font-medium" value={policy.type} onChange={(e) => setPolicy({...policy, type: e.target.value})}>
-                <option value="Agreement">Agreement</option>
-                <option value="Offer">Offer</option>
-                <option value="Set">Set</option>
+			    <option value="odrl:Policy">Policy</option>
+                <option value="odrl:Agreement">Agreement</option>
+                <option value="odrl:Offer">Offer</option>
+                <option value="odrl:Set">Set</option>
               </select>
             </div>
 
@@ -1140,30 +1534,26 @@ export default function OdrlEditor() {
               <input type="text" className="w-full border p-2 rounded" placeholder="e.g. urn:policy:v1" value={policy.uid || ''} onChange={(e) => setPolicy({...policy, uid: e.target.value})} />
             </div>
 
-            <div>
-              <label className="block font-semibold mb-1">Profile</label>
-              <input type="text" className="w-full border p-2 rounded" placeholder="e.g. Standard" value={policy.profile || ''} onChange={(e) => setPolicy({...policy, profile: e.target.value})} />
-            </div>
-
+			
             {/* Assigner Field / Add Button Logic */}
-            {policy.type === 'Agreement' ? (
+            {normalizedType === 'Agreement' ? (
               <div>
                 <label className="block font-semibold mb-1">Assigner</label>
-                <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assigner URI or ID" value={policy.assigner || ''} onChange={(e) => setPolicy({...policy, assigner: e.target.value})} />
+                <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assigner URI or ID" value={policy.assigner?.["@id"] || ''}  onChange={(e) => setPolicy({...policy, assigner: e.target.value ? { "@id": e.target.value } : null})} />
               </div>
-            ) : policy.type === 'Offer' ? (
+            ) : normalizedType === 'Offer' ? (
               <div>
                 <label className="block font-semibold mb-1">Assigner</label>
-                <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assigner URI or ID" value={policy.assigner || ''} onChange={(e) => setPolicy({...policy, assigner: e.target.value})} />
+                <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assigner URI or ID" value={policy.assigner?.["@id"] || ''} onChange={(e) => setPolicy({...policy, assigner: e.target.value ? { "@id": e.target.value } : null})} />
               </div>
-            ) : policy.type === 'Set' ? (
+            ) : normalizedType === 'Set' || normalizedType === 'Policy' ? (
               policy.assigner !== null && policy.assigner !== undefined ? (
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="font-semibold">Assigner</label>
                     <button onClick={() => setPolicy({ ...policy, assigner: null })} className="text-rose-500 hover:text-rose-700 font-bold text-xs px-1">✕</button>
                   </div>
-                  <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assigner URI or ID" value={policy.assigner || ''} onChange={(e) => setPolicy({...policy, assigner: e.target.value})} />
+                  <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assigner URI or ID" value={policy.assigner?.["@id"] || ''} onChange={(e) => setPolicy({...policy, assigner: e.target.value ? { "@id": e.target.value } : null})} />
                 </div>
               ) : (
                 <button onClick={() => setPolicy({ ...policy, assigner: '' })} className="text-xs bg-slate-100 border border-slate-300 px-3 py-2 rounded text-slate-700 font-medium hover:bg-slate-200 text-left transition-colors">+ Add Assigner</button>
@@ -1171,31 +1561,31 @@ export default function OdrlEditor() {
             ) : null}
 
             {/* Assignee Field / Add Button Logic */}
-            {policy.type === 'Agreement' ? (
+            {normalizedType === 'Agreement' ? (
               <div>
                 <label className="block font-semibold mb-1">Assignee</label>
-                <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assignee URI or ID" value={policy.assignee || ''} onChange={(e) => setPolicy({...policy, assignee: e.target.value})} />
+                <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assignee URI or ID" value={policy.assignee?.["@id"] || ''} onChange={(e) => setPolicy({...policy, assignee: e.target.value ? { "@id": e.target.value } : null})} />
               </div>
-            ) : policy.type === 'Offer' ? (
+            ) : normalizedType === 'Offer' ? (
               policy.assignee !== null && policy.assignee !== undefined ? (
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="font-semibold">Assignee</label>
                     <button onClick={() => setPolicy({ ...policy, assignee: null })} className="text-rose-500 hover:text-rose-700 font-bold text-xs px-1">✕</button>
                   </div>
-                  <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assignee URI or ID" value={policy.assignee || ''} onChange={(e) => setPolicy({...policy, assignee: e.target.value})} />
+                  <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assignee URI or ID" value={policy.assignee?.["@id"] || ''} onChange={(e) => setPolicy({...policy, assignee: e.target.value ? { "@id": e.target.value } : null})} />
                 </div>
               ) : (
                 <button onClick={() => setPolicy({ ...policy, assignee: '' })} className="text-xs bg-slate-100 border border-slate-300 px-3 py-2 rounded text-slate-700 font-medium hover:bg-slate-200 text-left transition-colors">+ Add Assignee</button>
               )
-            ) : policy.type === 'Set' ? (
+            ) : normalizedType === 'Set' || normalizedType === 'Policy' ? (
               policy.assignee !== null && policy.assignee !== undefined ? (
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="font-semibold">Assignee</label>
                     <button onClick={() => setPolicy({ ...policy, assignee: null })} className="text-rose-500 hover:text-rose-700 font-bold text-xs px-1">✕</button>
                   </div>
-                  <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assignee URI or ID" value={policy.assignee || ''} onChange={(e) => setPolicy({...policy, assignee: e.target.value})} />
+                  <input type="text" className="w-full border p-2 rounded bg-white" placeholder="Assignee URI or ID" value={policy.assignee?.["@id"] || ''} onChange={(e) => setPolicy({...policy, assignee: e.target.value ? { "@id": e.target.value } : null})} />
                 </div>
               ) : (
                 <button onClick={() => setPolicy({ ...policy, assignee: '' })} className="text-xs bg-slate-100 border border-slate-300 px-3 py-2 rounded text-slate-700 font-medium hover:bg-slate-200 text-left transition-colors">+ Add Assignee</button>
@@ -1218,6 +1608,34 @@ export default function OdrlEditor() {
             ) : (
               <button onClick={() => setPolicy({ ...policy, conflict: 'perm' })} className="text-xs bg-slate-100 border border-slate-300 px-3 py-2 rounded text-slate-700 font-medium hover:bg-slate-200 text-left transition-colors">+ Add Conflict Strategy</button>
             )}
+			
+			
+            {/* Profile Area */}
+            <div className="flex flex-col gap-2 mt-2 w-full overflow-visible">
+              <div className="flex justify-between items-center">
+                <label className="font-semibold">Profile</label>
+                <button type="type" onClick={addMetadataProfile} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded font-medium hover:bg-blue-100 transition-colors">+ Add Profile</button>
+              </div>
+
+              {policy.profile !== undefined && policy.profile !== '' && (Array.isArray(policy.profile) ? policy.profile.length > 0 : true) ? (
+                <div className="p-2 bg-slate-50 rounded border border-slate-200 flex flex-col gap-2 w-full overflow-visible">
+                  {(Array.isArray(policy.profile) ? policy.profile : [policy.profile]).map((prof, idx) => (
+                    <div key={idx} className="flex gap-2 items-center w-full min-w-0">
+                      <input 
+                        type="text" 
+                        className="border p-1.5 rounded text-xs bg-white font-mono min-w-0 flex-1" 
+                        placeholder="e.g. Standard" 
+                        value={prof} 
+                        onChange={(e) => updateMetadataProfile(idx, e.target.value)} 
+                      />
+                      <button type="button" onClick={() => removeMetadataProfile(idx)} className="text-rose-500 hover:text-rose-700 font-bold text-xs px-1 shrink-0">✕</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400 italic p-2 bg-slate-50 border border-dashed rounded text-center w-full">No profiles configured.</div>
+              )}
+            </div>
 
             {/* Targets */}
             <div className="flex flex-col gap-2 mt-2 w-full overflow-visible">
@@ -1385,7 +1803,9 @@ export default function OdrlEditor() {
                       }}>
                         <option value="">-- Select Action --</option>
                         {dbActions.map(([path, uri, definition]) => (
-                          <option key={uri} value={uri} title={definition}>{path}</option>
+                          <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                            {path}
+                          </option>
                         ))}
                       </select>
 
@@ -1431,9 +1851,9 @@ export default function OdrlEditor() {
                           items[idxObj.idx].assigner.type = e.target.value;
                           setPolicy({...policy, [listKey]: items});
                         }}>
-                          <option value="Legal Entity">Legal Entity</option>
-                          <option value="Natural Person">Natural Person</option>
-                          <option value="Organisational Unit">Organisational Unit</option>
+                          <option value="https://w3id.org/dpv/owl#LegalEntity">Legal Entity</option>
+                          <option value="https://w3id.org/dpv/owl#NaturalPerson">Natural Person</option>
+                          <option value="https://w3id.org/dpv/owl#OrganisationalUnit">Organisational Unit</option>
                         </select>
 
                         <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
@@ -1480,9 +1900,9 @@ export default function OdrlEditor() {
                           items[idxObj.idx].actor.type = e.target.value;
                           setPolicy({...policy, [listKey]: items});
                         }}>
-                          <option value="Legal Entity">Legal Entity</option>
-                          <option value="Natural Person">Natural Person</option>
-                          <option value="Organisational Unit">Organisational Unit</option>
+                          <option value="https://w3id.org/dpv/owl#LegalEntity">Legal Entity</option>
+                          <option value="https://w3id.org/dpv/owl#NaturalPerson">Natural Person</option>
+                          <option value="https://w3id.org/dpv/owl#OrganisationalUnit">Organisational Unit</option>
                         </select>
 
                         <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
@@ -1518,7 +1938,9 @@ export default function OdrlEditor() {
                         }}>
                           <option value="">-- Select Purpose --</option>
                           {(dbPurposes || []).map(([path, uri, definition]) => (
-                            <option key={uri} value={uri} title={definition}>{path}</option>
+                            <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                             {path}
+                            </option>
                           ))}
                         </select>
 
@@ -1677,7 +2099,9 @@ export default function OdrlEditor() {
                           >
                             <option value="">-- Select Action --</option>
                             {dbActions.map(([path, uri, definition]) => (
-                              <option key={uri} value={uri} title={definition}>{path}</option>
+                              <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                               {path}
+                              </option>
                             ))}
                           </select>
 
@@ -1853,7 +2277,9 @@ export default function OdrlEditor() {
                                 >
                                   <option value="">-- Select Consequence Action --</option>
                                   {dbActions.map(([path, uri, definition]) => (
-                                    <option key={uri} value={uri} title={definition}>{path}</option>
+                                    <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                                     {path}
+                                    </option>
                                   ))}
                                 </select>
 
@@ -1982,21 +2408,6 @@ export default function OdrlEditor() {
         </div>
       )}
 
-      {/* Feature Under Development Modal */}
-      {showDevModal && (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-6">
-          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full flex flex-col gap-4 text-center">
-            <p className="text-sm font-medium text-slate-800">Feature currently under development</p>
-            <button 
-              onClick={() => setShowDevModal(false)} 
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-1.5 px-4 rounded text-xs transition-colors mx-auto"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Vocabulary Manager Modal */}
       {showVocabModal && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-6">
@@ -2024,7 +2435,7 @@ export default function OdrlEditor() {
         <span className="text-xs text-slate-500 font-mono">{backendStatus || "Idle - Ready to validate"}</span>
         <div className="flex gap-2">
           <button className="bg-slate-300 hover:bg-slate-400 font-medium px-4 py-1.5 rounded">Save Draft</button>
-          <button onClick={handlePublish} className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-5 py-1.5 rounded shadow">Publish Policy</button>
+          <button onClick={handlePublishClick} className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-5 py-1.5 rounded shadow">Publish Policy</button>
         </div>
       </footer>
     </div>

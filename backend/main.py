@@ -10,6 +10,9 @@ import json
 import os
 import rdflib
 
+import urllib.parse
+from pathlib import Path
+
 # Ensure the workspace directory exists on startup
 POLICIES_DIR = "POLICIES"
 if not os.path.exists(POLICIES_DIR):
@@ -155,6 +158,102 @@ right_operand_query = query_prefix + """
         }
     """
 
+
+
+def reset_default_vocabularies(profile_values: Optional[Union[str, List[str]]] = None):
+    """
+    Resets the global vocab_graph and populates it based on provided profile values.
+    Supports:
+      - Full HTTP/HTTPS URIs (downloaded or read if local)
+      - File-style URIs (e.g., file:///path/to/file.ttl)
+      - Local filenames or relative paths inside DEFAULT_VOCAB_DIR
+    """
+    global vocab_graph
+    
+    # 1. Completely reset the global graph
+    vocab_graph = rdflib.Graph()
+
+    if os.environ.get("EXTENDED_MODE"):
+        print("EXTENDED_MODE detected. Skipping loading of default vocabularies.")
+        return
+
+    if not os.path.exists(DEFAULT_VOCAB_DIR):
+        os.makedirs(DEFAULT_VOCAB_DIR)
+
+    # Normalize profile_values into a clean list of strings
+    profiles = []
+    if profile_values:
+        if isinstance(profile_values, str):
+            profiles = [p.strip() for p in profile_values.split(",") if p.strip()]
+        elif isinstance(profile_values, list):
+            profiles = [str(p).strip() for p in profile_values if p and str(p).strip()]
+
+    # Fallback: If no profiles are provided, load everything from DEFAULT_VOCAB_DIR as before
+    if not profiles:
+        print(f"No profile values specified. Loading all files from '{DEFAULT_VOCAB_DIR}'...")
+        for filename in os.listdir(DEFAULT_VOCAB_DIR):
+            file_path = os.path.join(DEFAULT_VOCAB_DIR, filename)
+            if os.path.isfile(file_path):
+                _parse_file_into_graph(file_path)
+        return
+
+    # Process each profile entry
+    for profile in profiles:
+        target_path = profile
+
+        # Strip 'file://' or 'file:///' if present
+        if profile.lower().startswith("file://"):
+            # Remove scheme prefix
+            path_part = profile[7:]
+            # If it starts with an extra slash on Windows (e.g., file:///C:/...), clean it up
+            if path_part.startswith("/") and len(path_part) > 2 and path_part[2] == ":":
+                path_part = path_part[1:]
+            
+            # Convert forward slashes to OS-specific slashes and make absolute if relative
+            target_path = os.path.abspath(os.path.normpath(urllib.parse.unquote(path_part)))
+
+        # Check if it's an absolute or relative local path/filename
+        if os.path.exists(target_path):
+            _parse_file_into_graph(target_path)
+        else:
+            # Try checking relative to DEFAULT_VOCAB_DIR
+            local_path = os.path.join(DEFAULT_VOCAB_DIR, profile)
+            if os.path.exists(local_path):
+                _parse_file_into_graph(local_path)
+            else:
+                # Check if it's a remote URL (http/https)
+                parsed_url = urllib.parse.urlparse(profile)
+                if parsed_url.scheme in ("http", "https"):
+                    try:
+                        print(f"Fetching remote vocabulary profile: {profile}")
+                        ext = profile.lower()
+                        fmt = _guess_rdf_format(ext)
+                        vocab_graph.parse(profile, format=fmt)
+                        print(f"Successfully loaded remote profile: {profile}")
+                    except Exception as e:
+                        print(f"Error fetching remote vocabulary profile '{profile}': {str(e)}")
+                else:
+                    print(f"Warning: Profile path or file not found: {target_path}")
+
+def _parse_file_into_graph(file_path: str):
+    ext = file_path.lower()
+    fmt = _guess_rdf_format(ext)
+    try:
+        vocab_graph.parse(file_path, format=fmt)
+        print(f"Loaded vocabulary source: {file_path} (Format: {fmt or 'auto-guessed'})")
+    except Exception as e:
+        print(f"Error loading vocabulary source '{file_path}': {str(e)}")
+
+def _guess_rdf_format(filename_or_url: str) -> Optional[str]:
+    if filename_or_url.endswith(('.ttl', '.turtle')):
+        return "turtle"
+    elif filename_or_url.endswith(('.json', '.jsonld', '.json-ld')):
+        return "json-ld"
+    elif filename_or_url.endswith(('.rdf', '.xml')):
+        return "xml"
+    elif filename_or_url.endswith(('.nt', '.ntriples')):
+        return "nt"
+    return None
 def init_default_vocabularies():
     global vocab_graph
     
@@ -669,6 +768,20 @@ async def convert_policy_to_ttl(payload: Union[Dict[str, Any], RawJsonLdPayload]
     except Exception as e:
         import traceback
         raise HTTPException(status_code=500, detail=f"RDF Conversion Engine Error: {str(e)}")
+        
+class VocabResetPayload(BaseModel):
+    profiles: Optional[Union[str, List[str]]] = Field(None, description="List or string of profile URIs/files")
+
+@app.post("/api/vocabularies/reset")
+async def api_reset_vocabularies(payload: VocabResetPayload):
+    try:
+        reset_default_vocabularies(payload.profiles)
+        return {
+            "status": "success",
+            "message": "Vocabulary graph successfully reset and re-parsed."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset vocabularies: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

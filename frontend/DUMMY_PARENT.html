@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parent Application - ODRL Mock Host</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            overflow: hidden;
+        }
+        .host-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            padding: 15px;
+            box-sizing: border-box;
+            gap: 10px;
+        }
+        h2 {
+            color: #333;
+            margin: 0;
+            font-size: 1.2rem;
+        }
+        .control-panel {
+            background: #fff;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        textarea {
+            width: 100%;
+            height: 160px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        button {
+            padding: 6px 14px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        iframe {
+            flex: 1;
+            width: 100%;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="host-container">
+        <h2>ODRL Editor Host Container</h2>
+        
+        <!-- Control Panel with Textarea -->
+        <div class="control-panel">
+            <div class="controls-row">
+                <p style="margin: 0;">Status: <span id="status" style="font-weight: bold; color: orange;">Waiting for editor to load...</span></p>
+                <button onclick="loadPastedPolicy()">Load Pasted Policy into Editor</button>
+            </div>
+            <textarea id="policyInput" placeholder="Paste your ODRL JSON-LD policy here..."></textarea>
+        </div>
+
+        <!-- ODRL Editor iframe -->
+        <iframe id="editorFrame" src="http://localhost:5173/"></iframe>
+		
+		<!-- Finalized Policy Panel -->
+        <div class="control-panel">
+            <div class="controls-row">
+                <p style="margin: 0;">Finalized Status: <span id="finalizeStatus" style="font-weight: bold; color: gray;">Waiting for publish...</span></p>
+            </div>
+            <textarea id="finalizedPolicyOutput" placeholder="Finalized policy JSON from the editor will appear here..." readonly></textarea>
+        </div>
+    </div>
+
+    <script>
+        // Default sample policy text to pre-fill the box
+        const defaultPolicy = {
+                     "@context": {
+                     "odrl": "http://www.w3.org/ns/odrl/2/",
+                     "dpv": "https://w3id.org/dpv/dpv-owl#",
+                     "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     },
+                     "@type": "odrl:Policy",
+                     "@id": "urn:uuid:9ec1afc4-aec3-4e3c-abd0-20efb39926f8",
+                     "profile": [
+                       "file://../backend/DEFAULT_VOCABULARIES/ODRL_DPV.rdf",
+                       "file://C:/Users/cm1v24/OneDrive - University of Southampton/Documents/ODRLEditor/gds_v3.ttl"
+                     ],
+                     "odrl:assigner": {
+                       "@id": "gate:gate"
+                     },
+                     "odrl:assignee": {
+                       "@id": "gate:acme"
+                     },
+                     "odrl:target": {
+                       "@id": "gate:59d1ddcb-f22f-4fc8-a665-2fbf4517c1ff"
+                     },
+                     "odrl:permission": [
+                     {
+                       "@type": "odrl:Permission",
+                       "odrl:action": {
+                       "@id": "http://www.w3.org/ns/odrl/2/use"
+                     },
+                     "odrl:constraint": [
+                     {
+                       "@type": "odrl:Constraint",
+                       "odrl:leftOperand": {
+                       "@id": "http://www.gate-ai.eu/gds#MembershipCredential.since"
+                     },
+                     "odrl:operator": {
+                       "@id": "http://www.w3.org/ns/odrl/2/gteq"
+                     },
+                     "odrl:rightOperand": "2026-01-01T00:00:00Z"
+                  }
+                ]
+              }
+            ]
+          };
+
+        // Populate the textarea with default JSON on load
+        document.getElementById('policyInput').value = JSON.stringify(defaultPolicy, null, 2);
+
+        const statusSpan = document.getElementById('status');
+        let editorWindow = null;
+
+        // Function to parse the textarea contents and send it to the iframe
+        window.loadPastedPolicy = function() {
+            if (!editorWindow) {
+                alert('Editor is not ready yet!');
+                return;
+            }
+
+            const rawText = document.getElementById('policyInput').value;
+            try {
+                const parsedPolicy = JSON.parse(rawText);
+                
+                // Send via postMessage
+                editorWindow.postMessage({
+                    type: 'MSG_INITIATE',
+                    policy: parsedPolicy
+                }, '*');
+
+                statusSpan.textContent = 'Pasted policy successfully loaded into editor!';
+                statusSpan.style.color = 'green';
+            } catch (error) {
+                alert('Invalid JSON format. Please check your syntax.');
+                statusSpan.textContent = 'Error: Invalid JSON in textarea.';
+                statusSpan.style.color = 'red';
+            }
+        };
+
+        // Listen for the ready handshake from the iframe
+        window.addEventListener('message', (event) => {
+            const message = event.data;
+            if (message && message.type === 'MSG_READY') {
+                statusSpan.textContent = 'Editor is ready! You can now load policies.';
+                statusSpan.style.color = 'blue';
+                editorWindow = event.source;
+                
+                // Automatically load the default text on startup
+                loadPastedPolicy();
+            }
+			
+			// Handle finalized policy published from the editor
+            if (message && message.type === 'MSG_FINALIZE') {
+                const finalizedPolicy = message.policy;
+                const formattedJson = typeof finalizedPolicy === 'string' 
+                    ? finalizedPolicy 
+                    : JSON.stringify(finalizedPolicy, null, 2);
+                
+                document.getElementById('finalizedPolicyOutput').value = formattedJson;
+                
+                const finalizeStatus = document.getElementById('finalizeStatus');
+                finalizeStatus.textContent = 'Policy successfully received from editor!';
+                finalizeStatus.style.color = 'green';
+            }
+        });
+    </script>
+
+</body>
+</html>

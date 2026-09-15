@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
  * Custom hook to manage ODRL policy state, server synchronization, 
  * vocabulary data fetching, and JSON-LD compilation.
  */
-export function useOdrlPolicy() {
+export function useOdrlPolicy({ customUris = [] } = {}) {
   // Use an object structure for tracking active rules across permissions and prohibitions
   const [activePermissionIdx, setActivePermissionIdx] = useState({ type: 'permission', idx: 0 });
 
@@ -25,9 +25,9 @@ export function useOdrlPolicy() {
 
   // Core policy object state initialization (including prohibitions array)
   const [policy, setPolicy] = useState({
-    type: 'Agreement',
+    type: 'odrl:Policy',
     uid: '',
-    profile: '',
+    profile: ['file://../backend/DEFAULT_VOCABULARIES/ODRL_DPV.rdf'],
     assigner: null,
     assignee: null,
     conflict: null,
@@ -90,23 +90,23 @@ export function useOdrlPolicy() {
     fetchGraphVocabularies();
   }, []);
 
-  // Helper builder for constraints / refinements mapping supporting nested logical groups
+  /// Helper builder for constraints mapping supporting nested logical groups with validation
   const buildConstraintsObj = (constraints) => {
     if (!constraints || constraints.length === 0) return undefined;
-  
+
     return constraints.map(item => {
       if (item.isGroup || item.type === 'group') {
-        const logicalOp = item.logicalOp || item.operator || 'and'; // 'and', 'or', 'xone', 'andSequence'
+        const logicalOp = item.logicalOp || item.operator || 'and';
         return {
           "@type": "LogicalConstraint",
           [logicalOp]: buildConstraintsObj(item.constraints) || []
         };
       } else {
         return {
-          "@type": "Constraint",
-          "leftOperand": item.leftOperand,
-          "operator": item.operator,
-          "rightOperand": item.rightOperand
+          "@type": "odrl:Constraint",
+          "odrl:leftOperand": { "@id": item.leftOperand },
+          "odrl:operator": { "@id": item.operator },
+          "odrl:rightOperand": item.rightOperand
         };
       }
     });
@@ -125,29 +125,48 @@ export function useOdrlPolicy() {
       //};
 	  
 	  const doc = {
-        "@context": {
-			"@vocab": "http://www.w3.org/ns/odrl.jsonld",
-          "odrl": "http://www.w3.org/ns/odrl.jsonld",
-         
-            "dcat": "http://www.w3.org/ns/dcat#",
-            "dpv": "https://w3id.org/dpv/dpv-owl#"
-         
+        "@context": {			
+            //"odrl": "http://www.w3.org/ns/odrl.jsonld",
+			"odrl": "http://www.w3.org/ns/odrl/2/",
+            "dpv": "https://w3id.org/dpv/dpv-owl#",
+			"rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+			// Transform the array of objects into key-value pairs for the context object
+            ...(Array.isArray(customUris) 
+              ? customUris.reduce((acc, item) => {
+                  if (item && item.prefix && item.uri) {
+                    acc[item.prefix.trim()] = item.uri.trim();
+                  }
+                  return acc;
+                }, {}) 
+              : {})         
         },
         "@type": policy.type || "Set",
         "@id": policy.uid || "urn:policy:unidentified"
       };
 
-      if (policy.profile) doc.profile = policy.profile;
-      if (policy.assigner) doc.assigner = policy.assigner;
-      if (policy.assignee) doc.assignee = policy.assignee;
-      if (policy.conflict) doc.conflict = policy.conflict;
+      // Replace: if (policy.profile) doc.profile = policy.profile;
+      if (policy.profile) {
+        const validProfiles = Array.isArray(policy.profile)
+          ? policy.profile.filter(p => p && p.trim() !== '')
+          : [policy.profile].filter(p => p && p.trim() !== '');
+
+        if (validProfiles.length === 1) {
+          doc.profile = validProfiles[0];
+        } else if (validProfiles.length > 1) {
+          doc.profile = validProfiles;
+        }
+      }
+	  
+      if (policy.assigner) doc["odrl:assigner"] = policy.assigner;
+      if (policy.assignee) doc["odrl:assignee"] = policy.assignee;
+      if (policy.conflict) doc["odrl:conflict"] = policy.conflict;
 
       if (policy.targets && policy.targets.length > 0) {
         const validTargets = policy.targets.filter(t => t && t.trim() !== '');
         if (validTargets.length === 1) {
-          doc.target = validTargets[0];
+          doc["odrl:target"] = { "@id": validTargets[0]};
         } else if (validTargets.length > 1) {
-          doc.target = {
+          doc["odrl:target"] = {
              "@type": "odrl:AssetCollection",
              // "source": validTargets.map(t => ({ "@id": t }))
 			 "source": validTargets.map(t => ( t ))
@@ -158,8 +177,10 @@ export function useOdrlPolicy() {
 
       // Serialize Permissions
       if (policy.permissions && policy.permissions.length > 0) {
-        doc.permission = policy.permissions.map(perm => {
-          const pObj = {};
+        doc["odrl:permission"] = policy.permissions.map(perm => {
+          const pObj = {
+            "@type": "odrl:Permission"
+          };
 		  
 		  if (perm.uid) {
             pObj.uid = perm.uid; // Places uid at the top of the permission rule block
@@ -167,12 +188,12 @@ export function useOdrlPolicy() {
 
           if (perm.action?.name) {
             if (perm.action.constraints && perm.action.constraints.length > 0) {
-              pObj.action = {
+              pObj["odrl:action"] = {
                 "@id": perm.action.name,
                 "refinement": buildConstraintsObj(perm.action.constraints)
               };
             } else {
-              pObj.action = perm.action.name;
+              pObj["odrl:action"] = { "@id": perm.action.name};
             }
           }
 
@@ -183,12 +204,12 @@ export function useOdrlPolicy() {
 		  if (perm.target?.name) {
             const targetConstraints = buildConstraintsObj(perm.target.constraints);
             if (targetConstraints) {
-              pObj.target = {
+              pObj["odrl:target"] = {
                 "source": perm.target.name,
                 "refinement": targetConstraints
               };
             } else {
-              pObj.target = perm.target.name;
+              pObj["odrl:target"] = { "@id": perm.target.name};
             }
           }
 
@@ -204,12 +225,13 @@ export function useOdrlPolicy() {
             const constraintsObj = buildConstraintsObj(perm.assigner.constraints);
   
             if (constraintsObj) {
-               pObj.assigner = {
+               pObj["odrl:assigner"] = {
                "@type": perm.assigner.type,
                "constraint": constraintsObj
                };
             } else {
-               pObj.assigner = perm.assigner.type;
+               //pObj["odrl:assigner"] = perm.assigner.type;
+			   pObj["odrl:assigner"] = { "@id": perm.assigner.type};
             }
           }
 
@@ -223,12 +245,12 @@ export function useOdrlPolicy() {
             const constraintsObj = buildConstraintsObj(perm.actor.constraints);
   
             if (constraintsObj) {
-               pObj.assignee = {
+               pObj["odrl:assignee"] = {
                "@type": perm.actor.type,
                "constraint": constraintsObj
                };
             } else {
-               pObj.assignee = perm.actor.type;
+               pObj["odrl:assignee"] = {"@id": perm.actor.type};
             }
           }
 
@@ -247,10 +269,10 @@ export function useOdrlPolicy() {
 
           if (perm.purpose?.name) {
             const purposeConstraint = {
-              "@type": "Constraint",
-              "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
-              "operator": "eq",
-              "rightOperand": perm.purpose.name
+              "@type": "odrl:Constraint",
+              "odrl:leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
+              "odrl:operator": "eq",
+              "odrl:rightOperand": perm.purpose.name
             };
 			
 			// Check specifically for purpose-specific constraints supplied by the user
@@ -277,7 +299,7 @@ export function useOdrlPolicy() {
           }
 
           if (constraintsList.length > 0) {
-            pObj.constraint = constraintsList;
+            pObj["odrl:constraint"] = constraintsList;
           }
 		 
 
@@ -291,12 +313,12 @@ export function useOdrlPolicy() {
               const dutyActionName = duty.actionObj?.name || duty.action;
               if (dutyActionName) {
                 if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
-                  dObj.action = {
+                  dObj["odrl:action"] = {
                     "@id": dutyActionName,
                     "refinement": buildConstraintsObj(duty.actionObj.constraints)
                   };
                 } else {
-                  dObj.action = dutyActionName;
+                  dObj["odrl:action"] = { "@id": dutyActionName};
                 }
               }
 		
@@ -339,7 +361,7 @@ export function useOdrlPolicy() {
 			  
               const dutyConst = buildConstraintsObj(duty.constraints);
               if (dutyConst) {
-                dObj.constraint = dutyConst;
+                dObj["odrl:constraint"] = dutyConst;
               }
               if (duty.consequences && duty.consequences.length > 0) {
                 dObj.consequence = duty.consequences.map(cons => ({
@@ -357,8 +379,10 @@ export function useOdrlPolicy() {
 
       // Serialize Prohibitions (Added to ensure block renders correctly)
       if (policy.prohibitions && policy.prohibitions.length > 0) {
-        doc.prohibition = policy.prohibitions.map(prohib => {
-          const prObj = {};
+        doc["odrl:prohibition"] = policy.prohibitions.map(prohib => {
+          const prObj = {
+            "@type": "odrl:Prohibition"
+          };
 		  
 		  if (prohib.uid) {
             prObj.uid = prohib.uid; // Places uid at the top of the prohibition rule block
@@ -366,12 +390,12 @@ export function useOdrlPolicy() {
 
           if (prohib.action?.name) {
             if (prohib.action.constraints && prohib.action.constraints.length > 0) {
-              prObj.action = {
+              prObj["odrl:action"] = {
                 "@id": prohib.action.name,
                 "refinement": buildConstraintsObj(prohib.action.constraints)
               };
             } else {
-              prObj.action = prohib.action.name;
+              prObj["odrl:action"] = { "@id": prohib.action.name};
             }
           }
 
@@ -408,7 +432,7 @@ export function useOdrlPolicy() {
                "constraint": constraintsObj
                };
             } else {
-               prObj.assigner = prohib.assigner.type;
+			   prObj["odrl:assigner"] = { "@id": prohib.assigner.type};
             }
           }
 
@@ -429,7 +453,7 @@ export function useOdrlPolicy() {
                "constraint": constraintsObj
                };
             } else {
-               prObj.assignee = prohib.actor.type;
+			   prObj["odrl:assignee"] = { "@id": prohib.actor.type};
             }
           }
 
@@ -448,10 +472,10 @@ export function useOdrlPolicy() {
 
           if (prohib.purpose?.name) {
             const purposeConstraint = {
-              "@type": "Constraint",
-              "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
-              "operator": "eq",
-              "rightOperand": prohib.purpose.name
+              "@type": "odrl:Constraint",
+              "odrl:leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
+              "odrl:operator": "eq",
+              "odrl:rightOperand": prohib.purpose.name
             };
 			
 			// Check specifically for purpose-specific constraints supplied by the user
@@ -478,7 +502,7 @@ export function useOdrlPolicy() {
           }
 
           if (prohibConstraintsList.length > 0) {
-            prObj.constraint = prohibConstraintsList;
+            prObj["odrl:constraint"] = prohibConstraintsList;
           }
 		  
 		  if (prohib.duties && prohib.duties.length > 0) {
@@ -488,12 +512,12 @@ export function useOdrlPolicy() {
               const dutyActionName = duty.actionObj?.name || duty.action;
               if (dutyActionName) {
                 if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
-                  dObj.action = {
+                  dObj["odrl:action"] = {
                     "@id": dutyActionName,
                     "refinement": buildConstraintsObj(duty.actionObj.constraints)
                   };
                 } else {
-                  dObj.action = dutyActionName;
+                  dObj["odrl:action"] = { "@id": dutyActionName};
                 }
               }
 
@@ -523,7 +547,7 @@ export function useOdrlPolicy() {
 
               const dutyConst = buildConstraintsObj(duty.constraints);
               if (dutyConst) {
-                dObj.constraint = dutyConst;
+                dObj["odrl:constraint"] = dutyConst;
               }
 
               if (duty.consequences && duty.consequences.length > 0) {
@@ -543,8 +567,10 @@ export function useOdrlPolicy() {
 	  
 	  // Serialize Obligations
       if (policy.obligations && policy.obligations.length > 0) {
-        doc.obligation = policy.obligations.map(obl => {
-          const obObj = {};
+        doc["odrl:obligation"] = policy.obligations.map(obl => {
+          const obObj = {
+            "@type": "odrl:Obligation"
+          };
 		  
 		  if (obl.uid) {
             obObj.uid = obl.uid; // Places uid at the top of the obligation rule block
@@ -552,12 +578,12 @@ export function useOdrlPolicy() {
 
           if (obl.action?.name) {
             if (obl.action.constraints && obl.action.constraints.length > 0) {
-              obObj.action = {
+              obObj["odrl:action"] = {
                 "@id": obl.action.name,
                 "refinement": buildConstraintsObj(obl.action.constraints)
               };
             } else {
-              obObj.action = obl.action.name;
+              obObj["odrl:action"] = { "@id": obl.action.name};
             }
           }
 
@@ -581,7 +607,7 @@ export function useOdrlPolicy() {
                 "constraint": constraintsObj
               };
             } else {
-              obObj.assigner = obl.assigner.type;
+			  obObj["odrl:assigner"] = { "@id": obl.assigner.type};
             }
           }
 
@@ -593,7 +619,7 @@ export function useOdrlPolicy() {
                 "constraint": constraintsObj
               };
             } else {
-              obObj.assignee = obl.actor.type;
+			  obObj["odrl:assignee"] = { "@id": obl.actor.type};
             }
           }
 
@@ -602,10 +628,10 @@ export function useOdrlPolicy() {
 
           if (obl.purpose?.name) {
             const purposeConstraint = {
-              "@type": "Constraint",
-              "leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
-              "operator": "eq",
-              "rightOperand": obl.purpose.name
+              "@type": "odrl:Constraint",
+              "odrl:leftOperand": "http://www.w3.org/ns/odrl/2/purpose",
+              "odrl:operator": "eq",
+              "odrl:rightOperand": obl.purpose.name
             };
             const purposeConstraints = buildConstraintsObj(obl.purpose.constraints);
             if (purposeConstraints && purposeConstraints.length > 0) {
@@ -626,7 +652,7 @@ export function useOdrlPolicy() {
           }
 
           if (constraintsList.length > 0) {
-            obObj.constraint = constraintsList;
+            obObj["odrl:constraint"] = constraintsList;
           }
 		  
 		  if (obl.duties && obl.duties.length > 0) {
@@ -636,12 +662,12 @@ export function useOdrlPolicy() {
               const dutyActionName = duty.actionObj?.name || duty.action;
               if (dutyActionName) {
                 if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
-                  dObj.action = {
+                  dObj["odrl:action"] = {
                     "@id": dutyActionName,
                     "refinement": buildConstraintsObj(duty.actionObj.constraints)
                   };
                 } else {
-                  dObj.action = dutyActionName;
+                  dObj["odrl:action"] = { "@id": dutyActionName};
                 }
               }
 
@@ -671,7 +697,7 @@ export function useOdrlPolicy() {
 
               const dutyConst = buildConstraintsObj(duty.constraints);
               if (dutyConst) {
-                dObj.constraint = dutyConst;
+                dObj["odrl:constraint"] = dutyConst;
               }
 
               if (duty.consequences && duty.consequences.length > 0) {
@@ -701,17 +727,23 @@ export function useOdrlPolicy() {
       const res = await fetch(`api/policies/${filename}`);
       if (res.ok) {
         const data = await res.json();
+		
+		// Support both namespaced and shorthand keys for robustness[cite: 13]
+        const rawPermissions = data["odrl:Permission"] || data.permission;
+        const rawProhibitions = data["odrl:Prohibition"] || data.prohibition;
+        const rawObligations = data["odrl:Obligation"] || data.obligation;
+		
         setPolicy({
           type: data["@type"] || 'Agreement',
           uid: data["@id"] || data.uid || '',
-          profile: data.profile || '',
+          profile: data.profile ? (Array.isArray(data.profile) ? data.profile : [data.profile]) : '',
           assigner: data.assigner || null,
           assignee: data.assignee || null,
           conflict: data.conflict || null,
           targets: data.target ? (Array.isArray(data.target) ? data.target : [data.target]) : [],
-          permissions: data.permission ? (Array.isArray(data.permission) ? data.permission : [data.permission]) : [],
-          prohibitions: data.prohibition ? (Array.isArray(data.prohibition) ? data.prohibition : [data.prohibition]) : [],
-		  obligations: data.obligation ? (Array.isArray(data.obligation) ? data.obligation : [data.obligation]) : []
+          permissions: rawPermissions ? (Array.isArray(rawPermissions) ? rawPermissions : [rawPermissions]) : [],
+          prohibitions: rawProhibitions ? (Array.isArray(rawProhibitions) ? rawProhibitions : [rawProhibitions]) : [],
+		  obligations:rawObligations ? (Array.isArray(rawObligations) ? rawObligations : [rawObligations]) : []
         });
         setShowDropdown(false);
         setBackendStatus(`Loaded policy: ${filename}`);
@@ -780,6 +812,6 @@ export function useOdrlPolicy() {
     shaclResult, showShaclReport, setShowShaclReport,
     serverFiles, showDropdown, setShowDropdown,
     dbActions, dbPurposes, dbLeftOperands, dbOperators, dbRightOperands,
-    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl
+    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl, fetchGraphVocabularies
   };
 }
