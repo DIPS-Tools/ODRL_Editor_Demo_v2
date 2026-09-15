@@ -25,7 +25,7 @@ export function renderLeftOperandSelect(value, onChangeHandler, dbLeftOperands) 
       <option value="" disabled>-- Left Operand --</option>
       {optionsToRender.length > 0 ? (
         optionsToRender.map(([path, uri, definition]) => (
-          <option key={uri} value={uri} title={definition}>{path}</option>
+          <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>{path}</option>
         ))
       ) : (
         <>
@@ -71,7 +71,7 @@ export function renderOperatorSelect(value, onChangeHandler, dbOperators) {
     <select className="w-20 min-w-0 border p-1 rounded text-xs bg-white shrink-0 font-medium" value={selectedValue || ''} onChange={onChangeHandler}>
       <option value="" disabled>-- Op --</option>
       {optionsToRender.map(([path, uri, definition]) => (
-        <option key={uri} value={uri} title={definition}>{path}</option>
+        <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>{path}</option>
       ))}
     </select>
   );
