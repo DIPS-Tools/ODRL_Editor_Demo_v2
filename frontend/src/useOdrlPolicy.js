@@ -27,7 +27,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   const [policy, setPolicy] = useState({
     type: 'odrl:Policy',
     uid: '',
-    profile: ['file://../backend/DEFAULT_VOCABULARIES/ODRL_DPV.rdf'],
+    profile: ['file://./DEFAULT_VOCABULARIES/ODRL_DPV.rdf'],
     assigner: null,
     assignee: null,
     conflict: null,
