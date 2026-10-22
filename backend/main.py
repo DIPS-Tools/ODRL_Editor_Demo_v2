@@ -159,8 +159,8 @@ right_operand_query = query_prefix + """
     """
     
     
-# Define the SPARQL query to get actions and their relationships
-actor_query = query_prefix + """
+# Define the SPARQL query to get actors and their relationships
+actor_query_old = query_prefix + """
     SELECT DISTINCT ?action ?label ?definition ?sub_action ?sub_label ?sub_definition
         WHERE {
             bind("No definition available" as ?default_definition)
@@ -180,6 +180,41 @@ actor_query = query_prefix + """
             bind(coalesce(?sub_definition_res, ?default_sub_definition) as ?sub_definition)
         }
     """
+    
+actor_query = query_prefix + """
+    SELECT DISTINCT ?action ?label ?definition ?sub_action ?sub_label ?sub_definition
+    WHERE {
+        bind("No definition available" as ?default_definition)
+        bind("No definition available" as ?default_sub_definition)
+    
+        {
+           # Pattern 1: Extract Subclass Hierarchy down from dvpowl:Entity
+           ?sub_action rdfs:subClassOf ?action .
+           ?action rdfs:subClassOf* dvpowl:Entity .
+           ?sub_action rdfs:subClassOf* dvpowl:Entity .
+        }
+        #UNION
+        #{
+        #   # Pattern 2: Extract Instances of any class/subclass under dvpowl:Entity
+        #   ?sub_action rdf:type ?action .
+        #   ?action rdfs:subClassOf* dvpowl:Entity .
+        #}
+    
+        # Retrieve labels and definitions for the child element (?sub_action)
+        ?sub_action (rdfs:label | skos:prefLabel) ?sub_label .
+        OPTIONAL { ?sub_action (skos:definition | rdfs:comment | skos:note) ?sub_definition_res . }
+    
+        # Retrieve labels and definitions for the parent class (?action)
+        ?action (rdfs:label | skos:prefLabel) ?label .
+        OPTIONAL { ?action (skos:definition | rdfs:comment | skos:note) ?definition_res . }
+    
+        # Fallback definitions
+        BIND(COALESCE(?definition_res, ?default_definition) as ?definition)
+        BIND(COALESCE(?sub_definition_res, ?default_definition) as ?sub_definition)
+    }
+    ORDER BY ?action ?sub_action
+    """
+
 
 
 
