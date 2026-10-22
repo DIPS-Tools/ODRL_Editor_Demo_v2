@@ -51,6 +51,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   const [dbLeftOperands, setDbLeftOperands] = useState([]);
   const [dbOperators, setDbOperators] = useState([]);
   const [dbRightOperands, setDbRightOperands] = useState([]);
+  const [dbActors, setDbActors] = useState([]);
 
   // Fetch server file lists from backend
   const fetchServerFiles = async () => {
@@ -68,12 +69,13 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   // Fetch dynamic vocabulary rules graphs via endpoints
   const fetchGraphVocabularies = async () => {
     try {
-      const [actRes, purRes, leftRes, opRes, rightRes] = await Promise.all([
+      const [actRes, purRes, leftRes, opRes, rightRes, actorRes] = await Promise.all([
         fetch('api/actions'),
         fetch('api/purposes'),
         fetch('api/leftOperands'),
         fetch('api/operators'),
-        fetch('api/rightOperands')
+        fetch('api/rightOperands'),
+		fetch('api/actors')
       ]);
 
       if (actRes.ok) setDbActions(await actRes.json());
@@ -81,6 +83,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
       if (leftRes.ok) setDbLeftOperands(await leftRes.json());
       if (opRes.ok) setDbOperators(await opRes.json());
       if (rightRes.ok) setDbRightOperands(await rightRes.json());
+	  if (actorRes.ok) setDbActors(await actorRes.json());
     } catch (err) {
       console.error("Could not fetch graph vocabularies:", err);
     }
@@ -110,6 +113,27 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
         };
       }
     });
+  };
+  
+  // Helper builder for odrl:action objects with optional refinements using rdf:value
+  const buildActionObj = (actionData) => {
+    if (!actionData || !actionData.name) return undefined;
+
+    const actionName = actionData.name;
+    const constraints = buildConstraintsObj(actionData.constraints);
+
+    if (constraints && constraints.length > 0) {
+      return {
+        "rdf:value": {
+          "@id": actionName
+        },
+        "odrl:refinement": constraints
+      };
+    } else {
+      return {
+        "@id": actionName
+      };
+    }
   };
 
   // Compile policy state into JSON-LD whenever policy data changes
@@ -169,7 +193,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           doc["odrl:target"] = {
              "@type": "odrl:AssetCollection",
              // "source": validTargets.map(t => ({ "@id": t }))
-			 "source": validTargets.map(t => ( t ))
+			 "odrl:source": validTargets.map(t => ( t ))
           };
         }
       }
@@ -187,14 +211,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           }
 
           if (perm.action?.name) {
-            if (perm.action.constraints && perm.action.constraints.length > 0) {
-              pObj["odrl:action"] = {
-                "@id": perm.action.name,
-                "refinement": buildConstraintsObj(perm.action.constraints)
-              };
-            } else {
-              pObj["odrl:action"] = { "@id": perm.action.name};
-            }
+            pObj["odrl:action"] = buildActionObj(perm.action);
           }
 
           //if (perm.target?.name) {
@@ -205,8 +222,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             const targetConstraints = buildConstraintsObj(perm.target.constraints);
             if (targetConstraints) {
               pObj["odrl:target"] = {
-                "source": perm.target.name,
-                "refinement": targetConstraints
+                "odrl:source": perm.target.name,
+                "odrl:refinement": targetConstraints
               };
             } else {
               pObj["odrl:target"] = { "@id": perm.target.name};
@@ -310,16 +327,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
               const dObj = {};
 			  
               // FIXED: Check duty.actionObj for action name and refinements, fallback to duty.action
-              const dutyActionName = duty.actionObj?.name || duty.action;
-              if (dutyActionName) {
-                if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
-                  dObj["odrl:action"] = {
-                    "@id": dutyActionName,
-                    "refinement": buildConstraintsObj(duty.actionObj.constraints)
-                  };
-                } else {
-                  dObj["odrl:action"] = { "@id": dutyActionName};
-                }
+              const dutyActionData = duty.actionObj?.name ? duty.actionObj : { name: duty.action, constraints: duty.actionObj?.constraints || [] };
+              if (dutyActionData.name) {
+                dObj["odrl:action"] = buildActionObj(dutyActionData);
               }
 		
               //if (duty.assigner) {
@@ -389,14 +399,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           }
 
           if (prohib.action?.name) {
-            if (prohib.action.constraints && prohib.action.constraints.length > 0) {
-              prObj["odrl:action"] = {
-                "@id": prohib.action.name,
-                "refinement": buildConstraintsObj(prohib.action.constraints)
-              };
-            } else {
-              prObj["odrl:action"] = { "@id": prohib.action.name};
-            }
+            prObj["odrl:action"] = buildActionObj(prohib.action);
           }
 
           //if (prohib.target?.name) {
@@ -407,8 +410,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             const targetConstraints = buildConstraintsObj(prohib.target.constraints);
             if (targetConstraints) {
               prObj.target = {
-                "source": prohib.target.name,
-                "refinement": targetConstraints
+                "odrl:source": prohib.target.name,
+                "odrl:refinement": targetConstraints
               };
             } else {
               prObj.target = prohib.target.name;
@@ -509,16 +512,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             prObj.remedy = prohib.duties.map(duty => {
               const dObj = {};
               
-              const dutyActionName = duty.actionObj?.name || duty.action;
-              if (dutyActionName) {
-                if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
-                  dObj["odrl:action"] = {
-                    "@id": dutyActionName,
-                    "refinement": buildConstraintsObj(duty.actionObj.constraints)
-                  };
-                } else {
-                  dObj["odrl:action"] = { "@id": dutyActionName};
-                }
+              const dutyActionData = duty.actionObj?.name ? duty.actionObj : { name: duty.action, constraints: duty.actionObj?.constraints || [] };
+              if (dutyActionData.name) {
+                dObj["odrl:action"] = buildActionObj(dutyActionData);
               }
 
               if (duty.assigner) {
@@ -577,22 +573,15 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           }
 
           if (obl.action?.name) {
-            if (obl.action.constraints && obl.action.constraints.length > 0) {
-              obObj["odrl:action"] = {
-                "@id": obl.action.name,
-                "refinement": buildConstraintsObj(obl.action.constraints)
-              };
-            } else {
-              obObj["odrl:action"] = { "@id": obl.action.name};
-            }
+            obObj["odrl:action"] = buildActionObj(obl.action);
           }
 
           if (obl.target?.name) {
             const targetConstraints = buildConstraintsObj(obl.target.constraints);
             if (targetConstraints) {
               obObj.target = {
-                "source": obl.target.name,
-                "refinement": targetConstraints
+                "odrl:source": obl.target.name,
+                "odrl:refinement": targetConstraints
               };
             } else {
               obObj.target = obl.target.name;
@@ -659,16 +648,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             obObj.consequence = obl.duties.map(duty => {
               const dObj = {};
               
-              const dutyActionName = duty.actionObj?.name || duty.action;
-              if (dutyActionName) {
-                if (duty.actionObj?.constraints && duty.actionObj.constraints.length > 0) {
-                  dObj["odrl:action"] = {
-                    "@id": dutyActionName,
-                    "refinement": buildConstraintsObj(duty.actionObj.constraints)
-                  };
-                } else {
-                  dObj["odrl:action"] = { "@id": dutyActionName};
-                }
+              const dutyActionData = duty.actionObj?.name ? duty.actionObj : { name: duty.action, constraints: duty.actionObj?.constraints || [] };
+              if (dutyActionData.name) {
+                dObj["odrl:action"] = buildActionObj(dutyActionData);
               }
 
               if (duty.assigner) {
@@ -811,7 +793,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
     jsonLd, backendStatus,
     shaclResult, showShaclReport, setShowShaclReport,
     serverFiles, showDropdown, setShowDropdown,
-    dbActions, dbPurposes, dbLeftOperands, dbOperators, dbRightOperands,
+    dbActions, dbPurposes, dbLeftOperands, dbOperators, dbRightOperands, dbActors,
     fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl, fetchGraphVocabularies
   };
 }

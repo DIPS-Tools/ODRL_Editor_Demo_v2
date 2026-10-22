@@ -21,7 +21,7 @@ export default function OdrlEditor() {
     jsonLd, backendStatus,
     shaclResult, showShaclReport, setShowShaclReport,
     serverFiles, showDropdown, setShowDropdown,
-    dbActions, dbPurposes, dbLeftOperands, dbOperators,
+    dbActions, dbPurposes, dbLeftOperands, dbOperators, dbActors,
     fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl,
     fetchGraphVocabularies
 	// NEXT { editorSettings }
@@ -33,6 +33,43 @@ export default function OdrlEditor() {
   const getEditorSetting = (settingKey) => {
     return editorSettings[settingKey];
   };
+  
+  // Read URL parameters to determine whether to show the left panel (defaults to true if omitted)
+  const [showLeftPanel] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('showLeftPanel');
+    if (param !== null) {
+      return param === 'true' || param === '1';
+    }
+    return true; // Default visibility when the parameter is not specified
+  });
+  
+  const [showHeader] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('showHeader');
+    if (param !== null) {
+      return param === 'true' || param === '1';
+    }
+    return true; // Default visibility when the parameter is not specified
+  });
+  
+  const [showCheckpointUndo] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('showCheckpointUndo');
+    if (param !== null) {
+      return param === 'true' || param === '1';
+    }
+    return true; // Default visibility when the parameter is not specified
+  });
+  
+  const [showPurpose] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('showPurpose');
+    if (param !== null) {
+      return param === 'true' || param === '1';
+    }
+    return false; // Defaults to false when omitted
+  });
   
   // State for magnifying glass floating modal
   const [showMagnifyModal, setShowMagnifyModal] = useState(false);
@@ -105,7 +142,7 @@ export default function OdrlEditor() {
             return {
               uid: getRawField(p, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']),
               action: { 
-                name: typeof rawAction === 'string' ? rawAction : (rawAction?.rdfValue || rawAction?.["@id"] || rawAction?.["odrl:rdfValue"] || ''), 
+                name: parseActionName(rawAction), 
                 constraints: parseConstraints(rawAction) 
               },
               assigner: rawAssigner ? { 
@@ -123,7 +160,9 @@ export default function OdrlEditor() {
               target: rawTarget ? { 
                 name: typeof rawTarget === 'string' 
                   ? rawTarget 
-                  : (Array.isArray(rawTarget.source) ? rawTarget.source.join(', ') : rawTarget.source || rawTarget?.["@id"] || rawTarget?.rdfValue || rawTarget?.id || ''), 
+                  : (Array.isArray(rawTarget.source || rawTarget["odrl:source"]) 
+                    ? (rawTarget.source || rawTarget["odrl:source"]).join(', ') 
+                    : rawTarget.source || rawTarget["odrl:source"] || rawTarget["@id"] || rawTarget.rdfValue || rawTarget.id || ''), 
                 constraints: parseConstraints(rawTarget) 
               } : null,
               constraints: parseConstraints(p),
@@ -137,9 +176,9 @@ export default function OdrlEditor() {
                   const dAssignee = getRawField(d, ['assignee', 'actor', 'odrl:assignee', 'odrl:actor', 'http://www.w3.org/ns/odrl/2/assignee']);
                 
                   return {
-                    action: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''),
+                    action: parseActionName(dAction),
                     actionObj: { 
-                      name: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''), 
+                      name: parseActionName(dAction), 
                       constraints: parseConstraints(dAction) 
                     },
                     assigner: dAssigner ? { 
@@ -288,7 +327,17 @@ export default function OdrlEditor() {
       };
     }
   };
-
+  // Helper to parse action name from string or object (supporting rdf:value / @id structures)
+  const parseActionName = (rawAction) => {
+    if (!rawAction) return '';
+    if (typeof rawAction === 'string') return rawAction;
+    if (rawAction["@id"]) return rawAction["@id"];
+    if (rawAction["rdf:value"]) {
+      const val = rawAction["rdf:value"];
+      return typeof val === 'string' ? val : (val["@id"] || '');
+    }
+    return rawAction.rdfValue || rawAction["odrl:rdfValue"] || '';
+  };
   // Helper to parse constraints or refinements from any ODRL entity object/array
   const parseConstraints = (obj) => {
 	if (!obj) return [];
@@ -373,7 +422,7 @@ export default function OdrlEditor() {
             
               // Action & action constraints with fallbacks
               action: { 
-                name: typeof rawAction === 'string' ? rawAction : (rawAction?.rdfValue || rawAction?.["@id"] || rawAction?.["odrl:rdfValue"] || ''), 
+                name: parseActionName(rawAction), 
                 constraints: parseConstraints(rawAction) 
               },
             
@@ -395,7 +444,9 @@ export default function OdrlEditor() {
               target: rawTarget ? { 
                 name: typeof rawTarget === 'string' 
                   ? rawTarget 
-                  : (Array.isArray(rawTarget.source) ? rawTarget.source.join(', ') : rawTarget.source || rawTarget?.["@id"] || rawTarget?.rdfValue || rawTarget?.id || ''), 
+                  : (Array.isArray(rawTarget.source || rawTarget["odrl:source"]) 
+				    ? (rawTarget.source || rawTarget["odrl:source"]).join(', ')
+					: rawTarget.source || rawTarget["odrl:source"] || rawTarget["@id"] || rawTarget.rdfValue || rawTarget.id || ''),
                 constraints: parseConstraints(rawTarget) 
               } : null,
             
@@ -412,9 +463,9 @@ export default function OdrlEditor() {
                   const dAssignee = getRawField(d, ['assignee', 'actor', 'odrl:assignee', 'odrl:actor', 'http://www.w3.org/ns/odrl/2/assignee']);
                 
                   return {
-                    action: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''),
+                    action: parseActionName(dAction),
                     actionObj: { 
-                      name: typeof dAction === 'string' ? dAction : (dAction?.rdfValue || dAction?.["@id"] || dAction?.["odrl:rdfValue"] || ''), 
+                      name: parseActionName(dAction), 
                       constraints: parseConstraints(dAction) 
                     },
                     assigner: dAssigner ? { 
@@ -1340,6 +1391,8 @@ export default function OdrlEditor() {
     <div className="flex flex-col h-screen bg-slate-100 font-sans text-sm text-slate-800 relative w-full min-w-[1280px]">
       
       {/* Header Toolbar */}
+	  {/* Top Header Panel (Rendered conditionally based on URL parameter) */}
+      {showHeader && (
       <header className="bg-slate-600 text-white pt-1.5 pb-1 px-2 flex justify-between items-end shadow-xs z-30 relative">
         <div className="flex flex-col items-start leading-none">
           <h1 className="font-bold tracking-wide text-[8px] uppercase mb-1">ODRL Editor</h1>
@@ -1510,11 +1563,13 @@ export default function OdrlEditor() {
         </div>	
 		
       </header>
+	  )}
 
       {/* Main Workspace */}
       <main className="flex flex-1 overflow-hidden p-4 gap-4 relative w-full h-full">
         
         {/* Left Panel: Metadata & SHACL */}
+		{showLeftPanel && ( 
         <div className="w-full lg:w-3/12 xl:w-1/4 flex flex-col gap-4 overflow-hidden h-full shrink-0">
           <section className="bg-white rounded-lg p-4 shadow flex flex-col gap-4 border border-slate-200 overflow-y-auto flex-1 min-h-0">
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2">Policy Metadata</h2>
@@ -1677,6 +1732,7 @@ export default function OdrlEditor() {
             )}
           </section>
         </div>
+		)}
 
         {/* Center Panel: Rule Builder & Rule Tabs */}
         <div className="flex-1 flex flex-col gap-4 overflow-hidden h-full min-w-[400px]">
@@ -1737,7 +1793,7 @@ export default function OdrlEditor() {
                         <div className="flex flex-wrap gap-2">
                           {!activeRule.assigner && <button onClick={addAssigner} className="text-xs bg-slate-600 text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assigner</button>}
                           {!activeRule.actor && <button onClick={addActor} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assignee</button>}
-                          {!activeRule.purpose && <button onClick={addPurpose} className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Purpose</button>}
+                          {showPurpose && !activeRule.purpose && (<button onClick={addPurpose} className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Purpose</button>)}
                           {hasGlobalTargets && !activeRule.target && <button onClick={addTarget} className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Target</button>}
                           {(isPerm || isProhib || isOblig) && (
                             <button 
@@ -1845,15 +1901,22 @@ export default function OdrlEditor() {
                             <button type="button" onClick={removeAssigner} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
                           </div>
                         </div>
-                        <select className="w-full border p-1.5 rounded text-xs bg-white font-medium" value={activeRule.assigner.type} onChange={(e) => {
-                          const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
-                          const items = [...policy[listKey]];
-                          items[idxObj.idx].assigner.type = e.target.value;
-                          setPolicy({...policy, [listKey]: items});
-                        }}>
-                          <option value="https://w3id.org/dpv/owl#LegalEntity">Legal Entity</option>
-                          <option value="https://w3id.org/dpv/owl#NaturalPerson">Natural Person</option>
-                          <option value="https://w3id.org/dpv/owl#OrganisationalUnit">Organisational Unit</option>
+                        <select 
+                          className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
+                          value={activeRule.assigner.type} 
+                          onChange={(e) => {
+                            const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                            const items = [...policy[listKey]];
+                            items[idxObj.idx].assigner.type = e.target.value;
+                            setPolicy({...policy, [listKey]: items});
+                          }}
+                        >
+                          <option value="">-- Select Assigner --</option>
+                          {dbActors.map(([path, uri, definition]) => (
+                            <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                              {path}
+                            </option>
+                          ))}
                         </select>
 
                         <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
@@ -1894,15 +1957,23 @@ export default function OdrlEditor() {
                             <button type="button" onClick={removeActor} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
                           </div>
                         </div>
-                        <select className="w-full border p-1.5 rounded text-xs bg-white font-medium" value={activeRule.actor.type} onChange={(e) => {
-                          const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
-                          const items = [...policy[listKey]];
-                          items[idxObj.idx].actor.type = e.target.value;
-                          setPolicy({...policy, [listKey]: items});
-                        }}>
-                          <option value="https://w3id.org/dpv/owl#LegalEntity">Legal Entity</option>
-                          <option value="https://w3id.org/dpv/owl#NaturalPerson">Natural Person</option>
-                          <option value="https://w3id.org/dpv/owl#OrganisationalUnit">Organisational Unit</option>
+                        {/* Updated Assignee Select Dropdown */}
+                        <select 
+                          className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
+                          value={activeRule.actor.type} 
+                          onChange={(e) => {
+                            const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                            const items = [...policy[listKey]];
+                            items[idxObj.idx].actor.type = e.target.value;
+                            setPolicy({...policy, [listKey]: items});
+                          }}
+                        >
+                          <option value="">-- Select Assignee --</option>
+                          {dbActors.map(([path, uri, definition]) => (
+                           <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                             {path}
+                           </option>
+                          ))}
                         </select>
 
                         <div className="flex flex-col gap-2 pl-3 border-l-2 border-slate-400 mt-1 w-full min-w-0">
@@ -2142,18 +2213,21 @@ export default function OdrlEditor() {
                               </div>
                             </div>
                             <select 
-							  className="w-full border p-1 rounded text-xs bg-white font-medium" 
-							  value={dutyBlock.assigner.type} 
-							  onChange={(e) => {
-                                // const listKey = isPerm ? 'permissions' : 'prohibitions';
-							    const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                              className="w-full border p-1 rounded text-xs bg-white font-medium font-mono truncate" 
+                              value={dutyBlock.assigner.type} 
+                              onChange={(e) => {
+                                const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
                                 const items = [...policy[listKey]];
                                 items[idxObj.idx].duties[dutyIdx].assigner.type = e.target.value;
                                 setPolicy({...policy, [listKey]: items});
-                              }}>
-                              <option value="Legal Entity">Legal Entity</option>
-                              <option value="Natural Person">Natural Person</option>
-                              <option value="Organisational Unit">Organisational Unit</option>
+                              }}
+                            >
+                              <option value="">-- Select Assigner --</option>
+                              {dbActors.map(([path, uri, definition]) => (
+                                <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                                 {path}
+                                </option>
+                              ))}
                             </select>
 
                             <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
@@ -2194,18 +2268,21 @@ export default function OdrlEditor() {
                               </div>
                             </div>
                             <select 
-							  className="w-full border p-1 rounded text-xs bg-white font-medium" 
-							  value={dutyBlock.actor.type} 
-							  onChange={(e) => {
-                                // const listKey = isPerm ? 'permissions' : 'prohibitions';
-							    const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
+                              className="w-full border p-1 rounded text-xs bg-white font-medium font-mono truncate" 
+                              value={dutyBlock.actor.type} 
+                              onChange={(e) => {
+                                const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
                                 const items = [...policy[listKey]];
                                 items[idxObj.idx].duties[dutyIdx].actor.type = e.target.value;
                                 setPolicy({...policy, [listKey]: items});
-                              }}>
-                              <option value="Legal Entity">Legal Entity</option>
-                              <option value="Natural Person">Natural Person</option>
-                              <option value="Organisational Unit">Organisational Unit</option>
+                              }}
+                            >
+                              <option value="">-- Select Assignee --</option>
+                              {dbActors.map(([path, uri, definition]) => (
+                                <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                                 {path}
+                                </option>
+                              ))}
                             </select>
 
                             <div className="flex flex-col gap-2 pl-3 border-l-2 border-amber-400 mt-1 w-full min-w-0">
@@ -2434,7 +2511,9 @@ export default function OdrlEditor() {
       <footer className="bg-slate-200 p-3 border-t flex justify-between items-center shadow-inner">
         <span className="text-xs text-slate-500 font-mono">{backendStatus || "Idle - Ready to validate"}</span>
         <div className="flex gap-2">
+		  {showCheckpointUndo && (
           <button className="bg-slate-300 hover:bg-slate-400 font-medium px-4 py-1.5 rounded">Save Draft</button>
+		  )}
           <button onClick={handlePublishClick} className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-5 py-1.5 rounded shadow">Publish Policy</button>
         </div>
       </footer>

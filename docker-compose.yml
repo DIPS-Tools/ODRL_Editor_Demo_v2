@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend  # Adjust to your FastAPI folder path
       dockerfile: Dockerfile.backend
+    restart: unless-stopped
     ports:
       - "8050:8005"
     volumes:
@@ -13,6 +14,7 @@ services:
     build:
       context: ./frontend # Adjust to your React folder path
       dockerfile: Dockerfile.frontend
+    restart: unless-stopped
     ports:
       - "3050:80"
     depends_on:

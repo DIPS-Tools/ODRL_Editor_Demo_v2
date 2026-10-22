@@ -157,6 +157,29 @@ right_operand_query = query_prefix + """
             bind(coalesce(?sub_definition_res, ?default_sub_definition) as ?sub_definition)
         }
     """
+    
+    
+# Define the SPARQL query to get actions and their relationships
+actor_query = query_prefix + """
+    SELECT DISTINCT ?action ?label ?definition ?sub_action ?sub_label ?sub_definition
+        WHERE {
+            bind("No definition available" as ?default_definition)
+            bind("No definition available" as ?default_sub_definition)
+            
+            ?sub_action (rdf:type / rdfs:subClassOf*) dvpowl:Entity .
+            ?sub_action ( rdfs:label | skos:prefLabel ) ?sub_label .
+            OPTIONAL { ?sub_action ( skos:definition | rdfs:comment | skos:note ) ?sub_definition_res . }
+            
+            OPTIONAL {
+                ?sub_action (odrl:includedIn | rdfs:subClassOf | skos:broader) ?action .
+                ?action ( rdfs:label | skos:prefLabel ) ?label .
+                OPTIONAL { ?action ( skos:definition | rdfs:comment | skos:note ) ?definition_res . }
+            }
+            
+            bind(coalesce(?definition_res, ?default_definition) as ?definition)
+            bind(coalesce(?sub_definition_res, ?default_sub_definition) as ?sub_definition)
+        }
+    """
 
 
 
@@ -329,7 +352,16 @@ class PublishPolicyPayload(BaseModel):
 def _build_hierarchy_tree(sparql_query: str) -> List[List[str]]:
     """Builds an alphabetized, deduplicated hierarchical tree array from SPARQL results."""
     print("<< INTO BUILD HIERARCHY TREE >>")
-    qres = vocab_graph.query(sparql_query)
+    try:
+        qres = vocab_graph.query(sparql_query)
+        print(f"<< SPARQL QUERY SUCCESS. Rows returned: {len(qres)} >>")
+    except Exception as e:
+        import traceback
+        print("<< SPARQL QUERY FAILED WITH EXCEPTION >>")
+        print(traceback.format_exc())
+        raise e
+    
+    print("<< SPARQL RESULT >>")
         
     children_map = defaultdict(list)
     label_to_uri = {}
@@ -405,8 +437,9 @@ def _build_hierarchy_tree(sparql_query: str) -> List[List[str]]:
         build_tree_paths(root, [])
         
     if sparql_query == actions_query:
-        print("Total response was <<< " + TOT_RESP)
-
+        print("Total response was <<< ") # + TOT_RESP)
+    
+    print("The number of formatted rows being returned is " + str(len(formatted_rows)))
     return sorted(formatted_rows, key=lambda x: x[0])
     
 # Robust constraint item parser
@@ -474,6 +507,14 @@ async def get_right_operand():
         return _build_hierarchy_tree(right_operand_query)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RightOperand query failure: {str(e)}")
+        
+@app.get("/api/actors")
+async def get_actors():
+    try:
+        return _build_hierarchy_tree(actor_query)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+
 
 @app.post("/api/validate")
 async def validate_policy_shacl(payload: Union[Dict[str, Any], RawJsonLdPayload]):
