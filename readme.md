@@ -86,5 +86,35 @@ Please do not use - currently deprecated
 Currently only available on locally deployed versions
 Placing (valid) files in backend/DEFAULT_VOCABULARIES will automatically add these
 
+#### Using the editor within an iFrame
+If the editor is being used within an iFrame it will automatically detect this.
+
+You may communicate with the editor in the following manner
+
+PARENT: The parent application registers a message listener for MSG_READY and loads a new overlay iframe with ODRL-editor inside.
+
+CHILD: Upon loading, the ODRL-editor recognizes it is within an iframe, registers a listener, waiting for MSG_INITIATE and sends MSG_READY to the parent.
+
+PARENT: When MSG_READY is received, the parent application sends another message (MSG_INITIATE), containing the JSON object.
+
+CHILD: The received JSON is loaded in to the editor and the user can continue his journey there.
+
+CHILD: When the user is ready, the user will click the Publish Policy button to send changesto send a message to the parent (MSG_FINALIZE), containing the modified JSON. 
+
+#### User configuration of the UI
+
+The user may user a number of URL Parameters to control elements of the behaviour of the UI.
+
+This example shows the current options:
+
+http://localhost:5173/?showLeftPanel=false&showHeader=false&showCheckpointUndo=false&showPurpose=false&showLoadPolicyFromServer=false
+
+showLeftPanel - Turns the Metadata and SHACL panels on and off (default on) Values: true/false
+showHeader - Turns the Header and buttons on and off (default on) Values: true/false
+showCheckpointUndo - Turns the Save Draft button on and off (default on) Values: true/false
+showPurpose - Turns the Purpose option button on and off (default off) Values: true/false
+showLoadPolicyFromServer - Turns the Load Policy from Server button on and off (default off) Values: true/false
+
+
 
 

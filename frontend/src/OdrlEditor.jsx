@@ -71,6 +71,15 @@ export default function OdrlEditor() {
     return false; // Defaults to false when omitted
   });
   
+  const [showLoadPolicyFromServer] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('showLoadPolicyFromServer');
+    if (param !== null) {
+      return param === 'true' || param === '1';
+    }
+    return false; // Default visibility when the parameter is not specified
+  });
+  
   // State for magnifying glass floating modal
   const [showMagnifyModal, setShowMagnifyModal] = useState(false);
 
@@ -220,7 +229,7 @@ export default function OdrlEditor() {
           setPolicy({
             type: parsedJson["@type"] || parsedJson["odrl:type"] || 'Set',
             uid: getRawField(parsedJson, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']) || '',
-            profile: parsedJson.profile || parsedJson["odrl:profile"] || '',
+            profile: parsedJson["odrl:profile"] || parsedJson.profile || '',
             assigner: (() => {
               const val = getRawField(parsedJson, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
               if (!val) return null;
@@ -303,17 +312,29 @@ export default function OdrlEditor() {
 
   // Helper to recursively parse single constraints or logical constraint groups
   const parseSingleConstraintItem = (c) => {
-    const logicalOp = ['and', 'or', 'xone', 'andSequence'].find(op => c[op]);
-    if (logicalOp && Array.isArray(c[logicalOp])) {
-      return {
-        isGroup: true,
-        logicalOp: logicalOp,
-        constraints: c[logicalOp].map(subC => parseSingleConstraintItem(subC))
-      };
-    } else {
+     // Support both shorthand and prefixed logical operators, and check for {"@list": [...]} wrappers
+      const logicalKeys = ['and', 'or', 'xone', 'andSequence', 'odrl:and', 'odrl:or', 'odrl:xone', 'odrl:andSequence'];
+      const foundKey = logicalKeys.find(op => c[op] !== undefined);
+  
+      if (foundKey) {
+        const rawVal = c[foundKey];
+        const subList = Array.isArray(rawVal) 
+          ? rawVal 
+          : (rawVal && Array.isArray(rawVal["@list"]) ? rawVal["@list"] : null);
+    
+        if (subList) {
+          const cleanOp = foundKey.replace('odrl:', '');
+          return {
+            isGroup: true,
+            logicalOp: cleanOp,
+            constraints: subList.map(subC => parseSingleConstraintItem(subC))
+          };
+        }
+      }
+
       const rawLeft = c["odrl:leftOperand"] || c.leftOperand;
       const rawOp = c["odrl:Operator"] || c["odrl:operator"] || c.operator;
-
+	  
       return {
         leftOperand: typeof rawLeft === 'object' && rawLeft !== null 
           ? (rawLeft["@id"] || rawLeft.id || '') 
@@ -325,7 +346,6 @@ export default function OdrlEditor() {
           
         rightOperand: c["odrl:rightOperand"] || c.rightOperand || ''
       };
-    }
   };
   // Helper to parse action name from string or object (supporting rdf:value / @id structures)
   const parseActionName = (rawAction) => {
@@ -360,6 +380,16 @@ export default function OdrlEditor() {
   const parsePartyType = (val) => {
     if (!val) return 'https://w3id.org/dpv/owl#LegalEntity';
     if (typeof val === 'string') return val;
+    if (val["odrl:source"]) {
+      const src = val["odrl:source"];
+      if (typeof src === 'string') return src;
+      return src["@id"] || src.id || 'https://w3id.org/dpv/owl#LegalEntity';
+    }
+    if (val.source) {
+      const src = val.source;
+      if (typeof src === 'string') return src;
+      return src["@id"] || src.id || 'https://w3id.org/dpv/owl#LegalEntity';
+    }
     return val["@id"] || val.id || val.type || val["@type"] || 'https://w3id.org/dpv/owl#LegalEntity';
   };
   
@@ -508,7 +538,7 @@ export default function OdrlEditor() {
           setPolicy({
             type: parsedJson["@type"] || parsedJson["odrl:type"] || 'Set',
             uid: getRawField(parsedJson, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']) || '',
-            profile: parsedJson.profile || parsedJson["odrl:profile"] || '',
+            profile: parsedJson["odrl:profile"] || parsedJson.profile || '',
             assigner: (() => {
               const val = getRawField(parsedJson, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
               if (!val) return null;
@@ -1397,6 +1427,7 @@ export default function OdrlEditor() {
         <div className="flex flex-col items-start leading-none">
           <h1 className="font-bold tracking-wide text-[8px] uppercase mb-1">ODRL Editor</h1>
           <div className="flex gap-2 items-center text-slate-800">
+		   {showLoadPolicyFromServer && (
             <div className="relative inline-block text-left text-slate-800">
               <button 
                 onClick={() => { fetchServerFiles(); setShowDropdown(!showDropdown); }}
@@ -1423,7 +1454,8 @@ export default function OdrlEditor() {
                 </>
               )}
             </div>
-
+		    )}
+		   
             <button onClick={() => setShowVocabModal(true)} className="bg-slate-700 hover:bg-slate-500 text-white font-semibold text-xs py-1 px-2.5 rounded flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-400 shadow-xs leading-tight">
               ➕ Add Simple Vocabulary
             </button>

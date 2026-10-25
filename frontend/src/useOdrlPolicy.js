@@ -100,10 +100,22 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
     return constraints.map(item => {
       if (item.isGroup || item.type === 'group') {
         const logicalOp = item.logicalOp || item.operator || 'and';
-        return {
-          "@type": "LogicalConstraint",
-          [logicalOp]: buildConstraintsObj(item.constraints) || []
-        };
+        
+		if (logicalOp === 'and') {
+	      // Use "@list" wrapper only for 'and'
+		  return {
+            "@type": "odrl:LogicalConstraint",
+             "odrl:and": {
+               "@list": buildConstraintsObj(item.constraints) || []
+             }
+          };
+		} else {
+          // Use direct array for 'or', 'xone', 'andSequence'
+          return {
+            "@type": "odrl:LogicalConstraint",
+             [`odrl:${logicalOp}`]: buildConstraintsObj(item.constraints) || []
+          };
+        }
       } else {
         return {
           "@type": "odrl:Constraint",
@@ -173,12 +185,18 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
         const validProfiles = Array.isArray(policy.profile)
           ? policy.profile.filter(p => p && p.trim() !== '')
           : [policy.profile].filter(p => p && p.trim() !== '');
-
+		  
         if (validProfiles.length === 1) {
-          doc.profile = validProfiles[0];
+          doc["odrl:profile"] = validProfiles[0];
         } else if (validProfiles.length > 1) {
-          doc.profile = validProfiles;
+          doc["odrl:profile"] = validProfiles;
         }
+		
+        //if (validProfiles.length === 1) {
+        //  doc.profile = validProfiles[0];
+        //} else if (validProfiles.length > 1) {
+        //  doc.profile = validProfiles;
+        ///}
       }
 	  
       if (policy.assigner) doc["odrl:assigner"] = policy.assigner;
@@ -243,8 +261,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   
             if (constraintsObj) {
                pObj["odrl:assigner"] = {
-               "@type": perm.assigner.type,
-               "constraint": constraintsObj
+               "odrl:source": { "@id": perm.assigner.type },
+               "odrl:refinement": constraintsObj
                };
             } else {
                //pObj["odrl:assigner"] = perm.assigner.type;
@@ -263,8 +281,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   
             if (constraintsObj) {
                pObj["odrl:assignee"] = {
-               "@type": perm.actor.type,
-               "constraint": constraintsObj
+               "odrl:source": { "@id": perm.actor.type },
+               "odrl:refinement": constraintsObj
                };
             } else {
                pObj["odrl:assignee"] = {"@id": perm.actor.type};
@@ -298,11 +316,13 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             // If user-supplied constraints exist, group them using 'and'
             if (purposeConstraints && purposeConstraints.length > 0) {
               constraintsList.push({
-                "@type": "LogicalConstraint",
-                "and": [
+                "@type": "odrl:LogicalConstraint",
+                "odrl:and": {
+                  "@list": [
                   purposeConstraint,
                   ...purposeConstraints
-                ]
+                   ]
+                }
               });
             } else {
               // Otherwise, just use the simple purpose constraint block
@@ -342,8 +362,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   
                 if (constraintsObj) {
                    dObj.assigner = {
-                   "@type": duty.assigner.type,
-                   "constraint": constraintsObj
+				   "odrl:source": { "@id": duty.assigner.type },
+                   "odrl:refinement": constraintsObj
                    };
                 } else {
                    dObj.assigner = duty.assigner.type;
@@ -360,8 +380,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   
                 if (constraintsObj) {
                    dObj.actor = {
-                   "@type": duty.actor.type,
-                   "constraint": constraintsObj
+				   "odrl:source": { "@id": duty.actor.type },
+                   "odrl:refinement": constraintsObj
                    };
                 } else {
                    dObj.actor = duty.actor.type;
@@ -431,8 +451,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   
             if (constraintsObj) {
                prObj.assigner = {
-               "@type": prohib.assigner.type,
-               "constraint": constraintsObj
+               "odrl:source": { "@id": prohib.assigner.type },
+               "odrl:refinement": constraintsObj
                };
             } else {
 			   prObj["odrl:assigner"] = { "@id": prohib.assigner.type};
@@ -452,8 +472,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   
             if (constraintsObj) {
                prObj.assignee = {
-               "@type": prohib.actor.type,
-               "constraint": constraintsObj
+               "odrl:source": { "@id": prohib.actor.type },
+               "odrl:refinement": constraintsObj
                };
             } else {
 			   prObj["odrl:assignee"] = { "@id": prohib.actor.type};
@@ -487,11 +507,13 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             // If user-supplied constraints exist, group them using 'and'
             if (purposeConstraintsProhib && purposeConstraintsProhib.length > 0) {
               prohibConstraintsList.push({
-                "@type": "LogicalConstraint",
-                "and": [
-                  purposeConstraint,
-                  ...purposeConstraintsProhib
-                ]
+                "@type": "odrl:LogicalConstraint",
+                "odrl:and": {
+                  "@list": [
+                    purposeConstraint,
+                    ...purposeConstraints
+                    ]
+                }
               });
             } else {
               // Otherwise, just use the simple purpose constraint block
@@ -521,8 +543,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
                 const constraintsObj = buildConstraintsObj(duty.assigner.constraints);
                 if (constraintsObj) {
                   dObj.assigner = {
-                    "@type": duty.assigner.type,
-                    "constraint": constraintsObj
+					"odrl:source": { "@id": duty.assigner.type },
+                    "odrl:refinement": constraintsObj
                   };
                 } else {
                   dObj.assigner = duty.assigner.type;
@@ -533,8 +555,8 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
                 const constraintsObj = buildConstraintsObj(duty.actor.constraints);
                 if (constraintsObj) {
                   dObj.actor = {
-                    "@type": duty.actor.type,
-                    "constraint": constraintsObj
+					"odrl:source": { "@id": duty.actor.type },
+                    "odrl:refinement": constraintsObj
                   };
                 } else {
                   dObj.actor = duty.actor.type;
@@ -591,9 +613,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           if (obl.assigner) {
             const constraintsObj = buildConstraintsObj(obl.assigner.constraints);
             if (constraintsObj) {
-              obObj.assigner = {
-                "@type": obl.assigner.type,
-                "constraint": constraintsObj
+              obObj["odrl:assigner"] = {
+				"odrl:source": { "@id": obl.assigner.type },
+                "odrl:refinement": constraintsObj
               };
             } else {
 			  obObj["odrl:assigner"] = { "@id": obl.assigner.type};
@@ -603,9 +625,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           if (obl.actor) {
             const constraintsObj = buildConstraintsObj(obl.actor.constraints);
             if (constraintsObj) {
-              obObj.assignee = {
-                "@type": obl.actor.type,
-                "constraint": constraintsObj
+              obObj["odrl:assignee"] = {
+				"odrl:source": { "@id": obl.actor.type },
+                "odrl:refinement": constraintsObj
               };
             } else {
 			  obObj["odrl:assignee"] = { "@id": obl.actor.type};
@@ -625,11 +647,13 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
             const purposeConstraints = buildConstraintsObj(obl.purpose.constraints);
             if (purposeConstraints && purposeConstraints.length > 0) {
               constraintsList.push({
-                "@type": "LogicalConstraint",
-                "and": [
-                  purposeConstraint,
-                  ...purposeConstraints
-                ]
+                "@type": "odrl:LogicalConstraint",
+                "odrl:and": {
+                  "@list": [
+                    purposeConstraint,
+                    ...purposeConstraints
+                    ]
+			    }
               });
             } else {
               constraintsList.push(purposeConstraint);
@@ -656,9 +680,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
               if (duty.assigner) {
                 const constraintsObj = buildConstraintsObj(duty.assigner.constraints);
                 if (constraintsObj) {
-                  dObj.assigner = {
-                    "@type": duty.assigner.type,
-                    "constraint": constraintsObj
+                  dObj["odrl:assigner"] = {
+					"odrl:source": { "@id": duty.assigner.type },
+                    "odrl:refinement": constraintsObj
                   };
                 } else {
                   dObj.assigner = duty.assigner.type;
@@ -668,9 +692,9 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
               if (duty.actor) {
                 const constraintsObj = buildConstraintsObj(duty.actor.constraints);
                 if (constraintsObj) {
-                  dObj.actor = {
-                    "@type": duty.actor.type,
-                    "constraint": constraintsObj
+			      dObj["odrl:assignee"] = {
+                      "odrl:source": { "@id": duty.actor.type },
+                      "odrl:refinement": constraintsObj
                   };
                 } else {
                   dObj.actor = duty.actor.type;
@@ -714,11 +738,12 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
         const rawPermissions = data["odrl:Permission"] || data.permission;
         const rawProhibitions = data["odrl:Prohibition"] || data.prohibition;
         const rawObligations = data["odrl:Obligation"] || data.obligation;
+		const profileData = data["odrl:profile"] || data.profile;
 		
         setPolicy({
           type: data["@type"] || 'Agreement',
           uid: data["@id"] || data.uid || '',
-          profile: data.profile ? (Array.isArray(data.profile) ? data.profile : [data.profile]) : '',
+          profile: profileData ? (Array.isArray(profileData) ? profileData : [profileData]) : '',
           assigner: data.assigner || null,
           assignee: data.assignee || null,
           conflict: data.conflict || null,
