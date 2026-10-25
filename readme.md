@@ -110,9 +110,13 @@ This example shows the current options:
 http://localhost:5173/?showLeftPanel=false&showHeader=false&showCheckpointUndo=false&showPurpose=false&showLoadPolicyFromServer=false
 
 showLeftPanel - Turns the Metadata and SHACL panels on and off (default on) Values: true/false
+
 showHeader - Turns the Header and buttons on and off (default on) Values: true/false
+
 showCheckpointUndo - Turns the Save Draft button on and off (default on) Values: true/false
+
 showPurpose - Turns the Purpose option button on and off (default off) Values: true/false
+
 showLoadPolicyFromServer - Turns the Load Policy from Server button on and off (default off) Values: true/false
 
 
