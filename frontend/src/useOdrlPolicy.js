@@ -187,9 +187,13 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           : [policy.profile].filter(p => p && p.trim() !== '');
 		  
         if (validProfiles.length === 1) {
-          doc["odrl:profile"] = validProfiles[0];
+          doc["odrl:profile"] = {
+            "@id": validProfiles[0]
+          };
         } else if (validProfiles.length > 1) {
-          doc["odrl:profile"] = validProfiles;
+          doc["odrl:profile"] = validProfiles.map(p => ({
+            "@id": p
+          }));
         }
 		
         //if (validProfiles.length === 1) {
@@ -738,7 +742,13 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
         const rawPermissions = data["odrl:Permission"] || data.permission;
         const rawProhibitions = data["odrl:Prohibition"] || data.prohibition;
         const rawObligations = data["odrl:Obligation"] || data.obligation;
-		const profileData = data["odrl:profile"] || data.profile;
+		// Robustly parse profiles supporting both strings and {@id: "..."} objects
+        const profileData = data["odrl:profile"] || data.profile;
+        const parsedProfiles = profileData 
+          ? (Array.isArray(profileData) ? profileData : [profileData]).map(p => 
+              typeof p === 'string' ? p : (p?.["@id"] || p?.id || '')
+            ).filter(Boolean)
+          : [];
 		
         setPolicy({
           type: data["@type"] || 'Agreement',

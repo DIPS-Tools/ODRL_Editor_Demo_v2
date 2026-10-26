@@ -229,7 +229,13 @@ export default function OdrlEditor() {
           setPolicy({
             type: parsedJson["@type"] || parsedJson["odrl:type"] || 'Set',
             uid: getRawField(parsedJson, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']) || '',
-            profile: parsedJson["odrl:profile"] || parsedJson.profile || '',
+            profile: (() => {
+              const rawProf = parsedJson["odrl:profile"] || parsedJson.profile;
+              if (!rawProf) return [];
+              return (Array.isArray(rawProf) ? rawProf : [rawProf]).map(p => 
+                typeof p === 'string' ? p : (p?.["@id"] || p?.id || '')
+              ).filter(Boolean);
+            })(),
             assigner: (() => {
               const val = getRawField(parsedJson, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
               if (!val) return null;
@@ -538,7 +544,13 @@ export default function OdrlEditor() {
           setPolicy({
             type: parsedJson["@type"] || parsedJson["odrl:type"] || 'Set',
             uid: getRawField(parsedJson, ['uid', '@id', 'odrl:uid', 'http://www.w3.org/ns/odrl/2/uid']) || '',
-            profile: parsedJson["odrl:profile"] || parsedJson.profile || '',
+            profile: (() => {
+              const rawProf = parsedJson["odrl:profile"] || parsedJson.profile;
+              if (!rawProf) return [];
+              return (Array.isArray(rawProf) ? rawProf : [rawProf]).map(p => 
+                typeof p === 'string' ? p : (p?.["@id"] || p?.id || '')
+              ).filter(Boolean);
+            })(),
             assigner: (() => {
               const val = getRawField(parsedJson, ['assigner', 'odrl:assigner', 'http://www.w3.org/ns/odrl/2/assigner']);
               if (!val) return null;
