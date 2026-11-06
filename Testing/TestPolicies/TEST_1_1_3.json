@@ -1,0 +1,468 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "dpv": "https://w3id.org/dpv/dpv-owl#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  },
+  "@type": "odrl:Policy",
+  "@id": "urn:policy:unidentified",
+  "odrl:profile": {
+    "@id": "file://./DEFAULT_VOCABULARIES/ODRL_DPV.rdf"
+  },
+  "odrl:permission": [
+    {
+      "@type": "odrl:Permission",
+      "odrl:action": {
+        "rdf:value": {
+          "@id": "http://www.w3.org/ns/odrl/2/use"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:and": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/language"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "en"
+                },
+                {
+                  "@type": "odrl:LogicalConstraint",
+                  "odrl:or": {
+                    "@list": [
+                      {
+                        "@type": "odrl:Constraint",
+                        "odrl:leftOperand": {
+                          "@id": "http://www.w3.org/ns/odrl/2/elapsedTime"
+                        },
+                        "odrl:operator": {
+                          "@id": "http://www.w3.org/ns/odrl/2/lt"
+                        },
+                        "odrl:rightOperand": "10"
+                      },
+                      {
+                        "@type": "odrl:Constraint",
+                        "odrl:leftOperand": {
+                          "@id": "http://www.w3.org/ns/odrl/2/elapsedTime"
+                        },
+                        "odrl:operator": {
+                          "@id": "http://www.w3.org/ns/odrl/2/gteq"
+                        },
+                        "odrl:rightOperand": "20"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "odrl:target": {
+        "odrl:source": "https://dips.soton.ac.uk/test-ns/DatasetOne",
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/relativeSize"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/gt"
+            },
+            "odrl:rightOperand": "10"
+          },
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:xone": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/version"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "2"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/industry"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "Mining"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/delayPeriod"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/neq"
+                  },
+                  "odrl:rightOperand": "10"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "odrl:assignee": {
+        "@id": "https://w3id.org/dpv/owl#Entity"
+      }
+    }
+  ],
+  "odrl:prohibition": [
+    {
+      "@type": "odrl:Prohibition",
+      "odrl:action": {
+        "rdf:value": {
+          "@id": "http://www.w3.org/ns/odrl/2/acceptTracking"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/recipient"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/eq"
+            },
+            "odrl:rightOperand": "BusCo"
+          },
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:andSequence": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/absolutePosition"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "xx"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/absoluteSize"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/lt"
+                  },
+                  "odrl:rightOperand": "100"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/absoluteSpatialPosition"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/isPartOf"
+                  },
+                  "odrl:rightOperand": "Hants"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "odrl:target": {
+        "odrl:source": "https://dips.soton.ac.uk/test-ns/DatasetOne",
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/relativeSize"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/gt"
+            },
+            "odrl:rightOperand": "10"
+          }
+        ]
+      },
+      "assigner": {
+        "odrl:source": {
+          "@id": "https://w3id.org/dpv/owl#Entity"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:or": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/language"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "en"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/dateTime"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/gt"
+                  },
+                  "odrl:rightOperand": "2026-10-31T23:59:59Z"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/event"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/isPartOf"
+                  },
+                  "odrl:rightOperand": "Cinference"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "assignee": {
+        "odrl:source": {
+          "@id": "https://w3id.org/dpv/owl#Entity"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:xone": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/language"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "en"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/language"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "fr"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "odrl:constraint": [
+        {
+          "@type": "odrl:Constraint",
+          "odrl:leftOperand": {
+            "@id": "http://www.w3.org/ns/odrl/2/fileFormat"
+          },
+          "odrl:operator": {
+            "@id": "http://www.w3.org/ns/odrl/2/eq"
+          },
+          "odrl:rightOperand": "pdf"
+        },
+        {
+          "@type": "odrl:LogicalConstraint",
+          "odrl:andSequence": {
+            "@list": [
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "http://www.w3.org/ns/odrl/2/absolutePosition"
+                },
+                "odrl:operator": {
+                  "@id": "http://www.w3.org/ns/odrl/2/eq"
+                },
+                "odrl:rightOperand": "Hants"
+              },
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "http://www.w3.org/ns/odrl/2/absoluteSize"
+                },
+                "odrl:operator": {
+                  "@id": "http://www.w3.org/ns/odrl/2/lt"
+                },
+                "odrl:rightOperand": "10"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "odrl:obligation": [
+    {
+      "@type": "odrl:Obligation",
+      "odrl:action": {
+        "rdf:value": {
+          "@id": "http://www.w3.org/ns/odrl/2/compensate"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:and": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/payAmount"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "100"
+                }
+              ]
+            }
+          },
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/elapsedTime"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/eq"
+            },
+            "odrl:rightOperand": "1 day"
+          }
+        ]
+      },
+      "odrl:target": {
+        "odrl:source": "https://dips.soton.ac.uk/test-ns/DatasetOne",
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/absolutePosition"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/eq"
+            },
+            "odrl:rightOperand": "xx"
+          },
+          {
+            "@type": "odrl:LogicalConstraint",
+            "odrl:or": {
+              "@list": [
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/absoluteSize"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/gt"
+                  },
+                  "odrl:rightOperand": "100"
+                },
+                {
+                  "@type": "odrl:Constraint",
+                  "odrl:leftOperand": {
+                    "@id": "http://www.w3.org/ns/odrl/2/spatialCoordinates"
+                  },
+                  "odrl:operator": {
+                    "@id": "http://www.w3.org/ns/odrl/2/eq"
+                  },
+                  "odrl:rightOperand": "n3E4"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "odrl:assigner": {
+        "odrl:source": {
+          "@id": "https://w3id.org/dpv/owl#Entity"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/industry"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/eq"
+            },
+            "odrl:rightOperand": "Charity"
+          }
+        ]
+      },
+      "odrl:assignee": {
+        "odrl:source": {
+          "@id": "https://w3id.org/dpv/owl#LegalEntity"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.w3.org/ns/odrl/2/industry"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/eq"
+            },
+            "odrl:rightOperand": "Charity"
+          }
+        ]
+      },
+      "odrl:constraint": [
+        {
+          "@type": "odrl:Constraint",
+          "odrl:leftOperand": {
+            "@id": "http://www.w3.org/ns/odrl/2/fileFormat"
+          },
+          "odrl:operator": {
+            "@id": "http://www.w3.org/ns/odrl/2/eq"
+          },
+          "odrl:rightOperand": "pdf"
+        },
+        {
+          "@type": "odrl:LogicalConstraint",
+          "odrl:and": {
+            "@list": [
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "http://www.w3.org/ns/odrl/2/media"
+                },
+                "odrl:operator": {
+                  "@id": "http://www.w3.org/ns/odrl/2/eq"
+                },
+                "odrl:rightOperand": "tv"
+              },
+              {
+                "@type": "odrl:Constraint",
+                "odrl:leftOperand": {
+                  "@id": "http://www.w3.org/ns/odrl/2/media"
+                },
+                "odrl:operator": {
+                  "@id": "http://www.w3.org/ns/odrl/2/eq"
+                },
+                "odrl:rightOperand": "sattv"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

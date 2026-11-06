@@ -1,0 +1,34 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "dpv": "https://w3id.org/dpv/dpv-owl#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  },
+  "@type": "odrl:Policy",
+  "@id": "urn:policy:unidentified",
+  "odrl:profile": {
+    "@id": "file://./DEFAULT_VOCABULARIES/gds_v3_TEST_VERSION.ttl"
+  },
+  "odrl:permission": [
+    {
+      "@type": "odrl:Permission",
+      "odrl:action": {
+        "rdf:value": {
+          "@id": "http://www.gate-ai.eu/gds#Copy"
+        },
+        "odrl:refinement": [
+          {
+            "@type": "odrl:Constraint",
+            "odrl:leftOperand": {
+              "@id": "http://www.gate-ai.eu/gds#Data"
+            },
+            "odrl:operator": {
+              "@id": "http://www.w3.org/ns/odrl/2/eq"
+            },
+            "odrl:rightOperand": "Open"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 @prefix pe: <https://github.com/paolo7/ODRL-Engine/ns#> .
 
+
 pe:odrlPolicy a sh:NodeShape ;
   sh:targetClass odrl:Policy, odrl:Set, odrl:Agreement, odrl:Offer ;
   sh:nodeKind sh:IRI ;

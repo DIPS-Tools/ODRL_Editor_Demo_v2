@@ -1,17 +1,28 @@
+from contextlib import asynccontextmanager
+from typing import Optional
 from typing import List, Dict, Any, Optional, Union
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from collections import defaultdict
 
 from Validate.validate import diagnose_ODRL
 
+from SPARQL import ACTION_QUERIES, LEFT_HAND_OPERAND_QUERIES, OPERATOR_QUERIES, ACTOR_QUERIES
+
 import json
 import os
+import pyoxigraph
 import rdflib
 
 import urllib.parse
 from pathlib import Path
+
+import asyncio
+import sys
+
+import time
+
 
 # Ensure the workspace directory exists on startup
 POLICIES_DIR = "POLICIES"
@@ -20,8 +31,19 @@ if not os.path.exists(POLICIES_DIR):
 
 DEFAULT_VOCAB_DIR = "DEFAULT_VOCABULARIES"
 
+# Dictionary to hold isolated graph stores and timestamps per client ID
+# Structure: { client_id: {"graph": rdflib.Graph, "last_accessed": float} }
+user_stores: Dict[str, Dict[str, Any]] = {}
+
+# Timeout threshold in seconds (e.g., 24 hours = 86400 seconds)
+SESSION_TIMEOUT_SECONDS = 24 * 60 * 60
+# SESSION_TIMEOUT_SECONDS = 120
+
+SESSION_CHECK_SECONDS = 3600
+# SESSION_CHECK_SECONDS = 120
+
 # Global rdflib Graph available for other functions
-vocab_graph = rdflib.Graph()
+#vocab_graph = rdflib.Graph()
 
 # Prefix block query variable defined globally
 query_prefix = """
@@ -215,21 +237,105 @@ actor_query = query_prefix + """
     ORDER BY ?action ?sub_action
     """
 
+async def cleanup_expired_sessions_loop():
+    """Background task that periodically scans and purges inactive user stores."""
+    while True:
+        try:
+            await asyncio.sleep(SESSION_CHECK_SECONDS)  # Check every 1 hour
+            print(f"Checking for graphs to purge")
+            current_time = time.time()
+            expired_clients = []
 
+            for client_id, data in user_stores.items():
+                print(f"Checking for client_id " + str(client_id))
+                if current_time - data["last_accessed"] > SESSION_TIMEOUT_SECONDS:
+                    expired_clients.append(client_id)
 
+            for client_id in expired_clients:
+                print(f"Purging inactive session store for client_id: {client_id} due to timeout.")
+                store = user_stores[client_id]["graph"]
+                store.remove((None, None, None))
+                del user_stores[client_id]
+                
+        except Exception as e:
+            print(f"Error in cleanup background task: {str(e)}")
 
-def reset_default_vocabularies(profile_values: Optional[Union[str, List[str]]] = None):
+def _trim_hierarchy_data(hierarchy_data, trim_item: Optional[str] = None):
     """
-    Resets the global vocab_graph and populates it based on provided profile values.
+    Removes rows that exclusively match `trim_item` and strips 
+    '<trim_item> -> ' from the start of matching hierarchical paths.
+    """
+    if not trim_item:
+        return hierarchy_data
+        
+    trimmed_rows = []
+    prefix_to_remove = trim_item + " -> "
+    
+    for row in hierarchy_data:
+        path = row[0]
+        if path == trim_item:
+            # Skip rows that ONLY contain the trim_item
+            continue
+        elif path.startswith(prefix_to_remove):
+            # Strip the prefix from the start of the path
+            new_path = path[len(prefix_to_remove):]
+            trimmed_rows.append([new_path] + row[1:])
+        else:
+            # Keep unrelated rows as they are
+            trimmed_rows.append(row)
+            
+    return trimmed_rows
+    
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup: Start background cleanup task ---
+    cleanup_task = asyncio.create_task(cleanup_expired_sessions_loop())
+    yield
+    # --- Shutdown: Cancel task and clear all user stores ---
+    cleanup_task.cancel()
+    for data in user_stores.values():
+        data["graph"].remove((None, None, None))
+    user_stores.clear()
+
+import uuid
+
+def reset_user_store(client_id: str):
+    """Clears all triples from an existing client store or initializes a new one."""
+    store = get_user_store(client_id)
+    # Remove all triples matching (None, None, None) to clear the graph
+    store.remove((None, None, None))
+    return store
+    
+def get_user_store(client_id: str) -> rdflib.Graph:
+    """Retrieves an existing store, updates its last accessed timestamp, or creates a new one."""
+    current_time = time.time()
+    """Retrieves an existing store for the client_id or creates and initializes a new one."""
+    if client_id not in user_stores:
+        print(f"Creating new isolated graph store for client_id: {client_id}")
+        new_store = rdflib.Graph(store="Oxigraph")
+        user_stores[client_id] = {
+            "graph": new_store,
+            "last_accessed": current_time
+        }
+    else:
+        # Refresh the last accessed timestamp on activity
+        user_stores[client_id]["last_accessed"] = current_time
+        
+    return user_stores[client_id]["graph"]
+    
+def reset_default_vocabularies(client_id: str, profile_values: Optional[Union[str, List[str]]] = None):
+    """
+    Resets the client vocab_graph and populates it based on provided profile values.
     Supports:
       - Full HTTP/HTTPS URIs (downloaded or read if local)
       - File-style URIs (e.g., file:///path/to/file.ttl)
       - Local filenames or relative paths inside DEFAULT_VOCAB_DIR
     """
-    global vocab_graph
+    #global vocab_graph
     
     # 1. Completely reset the global graph
-    vocab_graph = rdflib.Graph()
+    #vocab_graph = get_user_store(client_id)
+    vocab_graph = reset_user_store(client_id)
 
     if os.environ.get("EXTENDED_MODE"):
         print("EXTENDED_MODE detected. Skipping loading of default vocabularies.")
@@ -252,11 +358,12 @@ def reset_default_vocabularies(profile_values: Optional[Union[str, List[str]]] =
         for filename in os.listdir(DEFAULT_VOCAB_DIR):
             file_path = os.path.join(DEFAULT_VOCAB_DIR, filename)
             if os.path.isfile(file_path):
-                _parse_file_into_graph(file_path)
+                _parse_file_into_graph(vocab_graph, file_path)
         return
 
     # Process each profile entry
     for profile in profiles:
+        print("Loading profile " + str(profile))
         target_path = profile
 
         # Strip 'file://' or 'file:///' if present
@@ -272,12 +379,12 @@ def reset_default_vocabularies(profile_values: Optional[Union[str, List[str]]] =
 
         # Check if it's an absolute or relative local path/filename
         if os.path.exists(target_path):
-            _parse_file_into_graph(target_path)
+            _parse_file_into_graph(vocab_graph, target_path)
         else:
             # Try checking relative to DEFAULT_VOCAB_DIR
             local_path = os.path.join(DEFAULT_VOCAB_DIR, profile)
             if os.path.exists(local_path):
-                _parse_file_into_graph(local_path)
+                _parse_file_into_graph(vocab_graph, local_path)
             else:
                 # Check if it's a remote URL (http/https)
                 parsed_url = urllib.parse.urlparse(profile)
@@ -293,11 +400,11 @@ def reset_default_vocabularies(profile_values: Optional[Union[str, List[str]]] =
                 else:
                     print(f"Warning: Profile path or file not found: {target_path}")
 
-def _parse_file_into_graph(file_path: str):
+def _parse_file_into_graph(store: rdflib.Graph, file_path: str):
     ext = file_path.lower()
     fmt = _guess_rdf_format(ext)
     try:
-        vocab_graph.parse(file_path, format=fmt)
+        store.parse(file_path, format=fmt)
         print(f"Loaded vocabulary source: {file_path} (Format: {fmt or 'auto-guessed'})")
     except Exception as e:
         print(f"Error loading vocabulary source '{file_path}': {str(e)}")
@@ -312,6 +419,7 @@ def _guess_rdf_format(filename_or_url: str) -> Optional[str]:
     elif filename_or_url.endswith(('.nt', '.ntriples')):
         return "nt"
     return None
+    
 def init_default_vocabularies():
     global vocab_graph
     
@@ -346,14 +454,14 @@ def init_default_vocabularies():
             except Exception as e:
                 print(f"Error loading vocabulary file '{filename}': {str(e)}")
 
-init_default_vocabularies()
+#init_default_vocabularies()
 
 try:
     from pyshacl import validate as shacl_validate
 except ImportError:
     shacl_validate = None
 
-app = FastAPI(title="Abstract ODRL Editor Validation Server")
+app = FastAPI(title="Abstract ODRL Editor Validation Server", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -384,11 +492,11 @@ class PublishPolicyPayload(BaseModel):
     filename: str = Field(..., description="The name designated by the user for the policy output file.")
     policy_data: Dict[str, Any] = Field(..., description="The dynamic JSON-LD data payload representing the ODRL policy.")
 
-def _build_hierarchy_tree(sparql_query: str) -> List[List[str]]:
+def _build_hierarchy_tree(store: rdflib.Graph, sparql_query: str) -> List[List[str]]:
     """Builds an alphabetized, deduplicated hierarchical tree array from SPARQL results."""
     print("<< INTO BUILD HIERARCHY TREE >>")
     try:
-        qres = vocab_graph.query(sparql_query)
+        qres = store.query(sparql_query)
         print(f"<< SPARQL QUERY SUCCESS. Rows returned: {len(qres)} >>")
     except Exception as e:
         import traceback
@@ -476,6 +584,54 @@ def _build_hierarchy_tree(sparql_query: str) -> List[List[str]]:
     
     print("The number of formatted rows being returned is " + str(len(formatted_rows)))
     return sorted(formatted_rows, key=lambda x: x[0])
+
+# --- NEW/UPDATED STATUS ENDPOINT ---
+@app.get("/api/get_status")
+async def get_status():
+    """
+    Returns the current active graph stores with client_ids and latest timestamps,
+    along with the list of query names defined in SPARQL.py.
+    """
+    stores_summary = []
+    for client_id, data in user_stores.items():
+        stores_summary.append({
+            "client_id": client_id,
+            "latest_timestamp": data["last_accessed"],
+            "triple_count": len(data["graph"])
+        })
+        
+    return {
+        "status": "online",
+        "current_stores": stores_summary,
+        "sparql_queries": {
+            "ACTION_QUERIES": list(ACTION_QUERIES.keys()),
+            "LEFT_HAND_OPERAND_QUERIES": list(LEFT_HAND_OPERAND_QUERIES.keys()),
+            "OPERATOR_QUERIES": list(OPERATOR_QUERIES.keys()),
+            "ACTOR_QUERIES": list(ACTOR_QUERIES.keys())
+        }
+    }
+    
+@app.post("/api/heartbeat")
+async def client_heartbeat(client_id: str = Query(..., description="Unique client session ID")):
+    """Updates the last accessed timestamp for an active client session."""
+    if client_id in user_stores:
+        user_stores[client_id]["last_accessed"] = time.time()
+        return {"status": "success", "message": "Session refreshed."}
+    else:
+        # If the session expired or was never registered, you can either recreate it or return 404.
+        # Returning 404 lets the client know it needs to re-register if needed.
+        raise HTTPException(status_code=404, detail="Client session store not found.")
+        
+@app.post("/api/register")
+async def register_client():
+    """Generates a unique client ID on the server and initializes their isolated graph store."""
+    client_id = f"client_{uuid.uuid4()}"
+    store = get_user_store(client_id)
+    return {
+        "client_id": client_id,
+        "message": "Isolated graph store created successfully",
+        "total_triples_in_memory": len(store)
+    }
     
 # Robust constraint item parser
 def _parse_constraint_item(c: dict) -> dict:
@@ -847,11 +1003,13 @@ async def convert_policy_to_ttl(payload: Union[Dict[str, Any], RawJsonLdPayload]
         
 class VocabResetPayload(BaseModel):
     profiles: Optional[Union[str, List[str]]] = Field(None, description="List or string of profile URIs/files")
+    client_id: Optional[str] = Field("default_user", description="Unique client session ID")
 
 @app.post("/api/vocabularies/reset")
 async def api_reset_vocabularies(payload: VocabResetPayload):
     try:
-        reset_default_vocabularies(payload.profiles)
+        print("Reset vocabs " + str(payload.client_id) + " / " + str(payload.profiles))
+        reset_default_vocabularies(payload.client_id, payload.profiles)
         return {
             "status": "success",
             "message": "Vocabulary graph successfully reset and re-parsed."
@@ -859,6 +1017,190 @@ async def api_reset_vocabularies(payload: VocabResetPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reset vocabularies: {str(e)}")
 
+@app.get("/api/getActions")
+async def get_actions_new(plan_name: str = Query(..., description="Key name for ACTION_QUERIES"),
+                        client_id: str = Query("default_user", description="Unique client session ID")):
+    """
+    Endpoint that takes plan_number as its sole parameter to fetch and build 
+    the hierarchy tree using the corresponding index in ACTION_QUERIES.
+    """
+    try:
+        store = get_user_store(client_id)
+        hierarchy_data = _build_hierarchy_tree(store, query_prefix + ACTION_QUERIES[plan_name])
+        
+        # Apply the trimming function if trim_item is provided
+        
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "Action")
+        
+        return {
+            "plan_number": plan_name,
+            "total_triples_in_memory": len(store),
+            "query_run": ACTION_QUERIES[plan_name],
+            "number_of_items_returned": len(hierarchy_data),
+            #"configured_relationships": CONFIGURED_ACTION_RELATIONSHIPS,
+            "actions": hierarchy_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+
+@app.get("/api/getLeftHandOperands")
+async def get_left_hand_operands_new(plan_name: str = Query(..., description="Key name for LHO_QUERIES"),
+                        client_id: str = Query("default_user", description="Unique client session ID")):
+    """
+    Endpoint that takes plan_number as its sole parameter to fetch and build 
+    the hierarchy tree using the corresponding index in ACTION_QUERIES.
+    """
+    try:
+        store = get_user_store(client_id)
+        hierarchy_data = _build_hierarchy_tree(store, query_prefix + LEFT_HAND_OPERAND_QUERIES[plan_name])
+                
+        # Apply the trimming function if trim_item is provided
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "Left Operand")
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "LeftOperand")
+        
+        return {
+            "plan_number": plan_name,
+            "total_triples_in_memory": len(store),
+            "query_run": LEFT_HAND_OPERAND_QUERIES[plan_name],
+            "number_of_items_returned": len(hierarchy_data),
+            #"configured_relationships": CONFIGURED_ACTION_RELATIONSHIPS,
+            "actions": hierarchy_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+        
+@app.get("/api/getRelatedLeftHandOperands")
+async def get_related_left_hand_operands_new(
+    plan_name: str = Query(..., description="Key name for LHO_QUERIES"),
+    class_uri: str = Query(..., description="Target class URI to filter related items"),
+    client_id: str = Query("default_user", description="Unique client session ID")
+):
+
+    """
+    Endpoint that takes plan_number as its sole parameter to fetch and build 
+    the hierarchy tree using the corresponding index in ACTION_QUERIES.
+    """
+    try: 
+        print("Prepping query")
+        
+        PREPPED_QUERY=LEFT_HAND_OPERAND_QUERIES[plan_name].replace("{TARGET_CLASS}", class_uri)
+        
+        #print("The prepped query is " + PREPPED_QUERY)
+        
+        store = get_user_store(client_id)
+        print("The required store has " + str(len(store)))
+        hierarchy_data = _build_hierarchy_tree(store, query_prefix + PREPPED_QUERY)
+        
+        # Apply the trimming function if trim_item is provided
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "Left Operand")
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "LeftOperand")
+        
+        return {
+            "plan_number": plan_name,
+            "total_triples_in_memory": len(store),
+            "query_run": LEFT_HAND_OPERAND_QUERIES[plan_name],
+            "number_of_items_returned": len(hierarchy_data),
+            #"configured_relationships": CONFIGURED_ACTION_RELATIONSHIPS,
+            "actions": hierarchy_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+
+@app.get("/api/getOperators")
+async def get_operators_new(plan_name: str = Query(..., description="Key name for OP_QUERIES"),
+                        client_id: str = Query("default_user", description="Unique client session ID")):
+    """
+    Endpoint that takes plan_number as its sole parameter to fetch and build 
+    the hierarchy tree using the corresponding index in ACTION_QUERIES.
+    """
+    try:
+        store = get_user_store(client_id)
+        hierarchy_data = _build_hierarchy_tree(store, query_prefix + OPERATOR_QUERIES[plan_name])
+        
+        # Apply the trimming function if trim_item is provided
+        
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "Operator")
+        
+        return {
+            "plan_number": plan_name,
+            "total_triples_in_memory": len(store),
+            "query_run": OPERATOR_QUERIES[plan_name],
+            "number_of_items_returned": len(hierarchy_data),
+            #"configured_relationships": CONFIGURED_ACTION_RELATIONSHIPS,
+            "actions": hierarchy_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+        
+@app.get("/api/getRelatedOperators")
+async def get_related_operators_new(
+    plan_name: str = Query(..., description="Key name for OP_QUERIES"),
+    class_uri: str = Query(..., description="Target class URI to filter related items"),
+    client_id: str = Query("default_user", description="Unique client session ID")
+):
+
+    """
+    Endpoint that takes plan_number as its sole parameter to fetch and build 
+    the hierarchy tree using the corresponding index in ACTION_QUERIES.
+    """
+    try: 
+        print("Prepping query")
+        
+        PREPPED_QUERY=OPERATOR_QUERIES[plan_name].replace("{TARGET_CLASS}", class_uri)
+        
+        #print("The prepped query is " + PREPPED_QUERY)
+        
+        store = get_user_store(client_id)
+        hierarchy_data = _build_hierarchy_tree(store, query_prefix + PREPPED_QUERY)
+         
+        # Apply the trimming function if trim_item is provided
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "Operator")
+        
+        return {
+            "plan_number": plan_name,
+            "total_triples_in_memory": len(store),
+            "query_run": OPERATOR_QUERIES[plan_name],
+            "number_of_items_returned": len(hierarchy_data),
+            #"configured_relationships": CONFIGURED_ACTION_RELATIONSHIPS,
+            "actions": hierarchy_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+            
+@app.get("/api/getActors")
+async def get_actors_new(plan_name: str = Query(..., description="Key name for ACTOR_QUERIES"),
+                     client_id: str = Query("default_user", description="Unique client session ID")):
+    """
+    Endpoint that takes plan_number as its sole parameter to fetch and build 
+    the hierarchy tree using the corresponding index in ACTOR_QUERIES.
+    """
+    try:
+        store = get_user_store(client_id)
+        hierarchy_data = _build_hierarchy_tree(store, query_prefix + ACTOR_QUERIES[plan_name])
+        
+        # Apply the trimming function if trim_item is provided
+        hierarchy_data = _trim_hierarchy_data(hierarchy_data, "Party")
+        
+        return {
+            "plan_number": plan_name,
+            "total_triples_in_memory": len(store),
+            "query_run": ACTOR_QUERIES[plan_name],
+            "number_of_items_returned": len(hierarchy_data),
+            #"configured_relationships": CONFIGURED_ACTION_RELATIONSHIPS,
+            "actions": hierarchy_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph query pipeline failure: {str(e)}")
+   
 if __name__ == "__main__":
     import uvicorn
+    from uvicorn.config import LOGGING_CONFIG
+    
+    # Customize Uvicorn's default log formats to include timestamps
+    LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s %(levelprefix)s %(message)s"
+    LOGGING_CONFIG["formatters"]["default"]["datefmt"] = "%Y-%m-%d %H:%M:%S"
+    
+    LOGGING_CONFIG["formatters"]["access"]["fmt"] = '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s'
+    LOGGING_CONFIG["formatters"]["access"]["datefmt"] = "%Y-%m-%d %H:%M:%S"
+    
     uvicorn.run(app, host="127.0.0.1", port=8005)

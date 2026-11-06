@@ -48,12 +48,16 @@ export function renderOperatorSelect(value, onChangeHandler, dbOperators) {
 
   const currentNorm = normalizeOp(value);
   const defaultOps = [
-    ['=', 'eq', 'Equal to'],
+    ['Equal to', 'http://www.w3.org/ns/odrl/2/eq', 'Equal to']
+	
+	/*
+	,
     ['<', 'lt', 'Less than'],
     ['>', 'gt', 'Greater than'],
     ['>=', 'gte', 'Greater than or equal'],
     ['<=', 'lte', 'Less than or equal'],
     ['!=', 'neq', 'Not equal']
+	*/
   ];
 
   const sourceList = dbOperators.length > 0 ? dbOperators : defaultOps;

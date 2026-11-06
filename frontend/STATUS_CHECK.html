@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-900 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ODRL Store & SPARQL Query Dashboard</title>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            500: '#0284c7',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="h-full flex flex-col font-sans bg-slate-900 text-slate-100 antialiased selection:bg-sky-500 selection:text-white">
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="p-2.5 bg-sky-500/10 rounded-xl border border-sky-500/20 text-sky-400">
+                    <i class="fa-solid fa-database text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                        ODRL System Dashboard
+                    </h1>
+                    <p class="text-xs text-slate-400">Monitoring Client Stores & SPARQL Query Definitions</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <!-- Status Badge -->
+                <div id="connectionStatus" class="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                    <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse" id="statusDot"></span>
+                    <span id="statusText">Checking status...</span>
+                </div>
+
+                <!-- Manual Refresh Button -->
+                <button onclick="fetchStatus()" id="refreshBtn" class="flex items-center space-x-2 bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg shadow-sky-600/20 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]">
+                    <i class="fa-solid fa-rotate text-xs" id="refreshIcon"></i>
+                    <span>Fetch Status</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <!-- Top Stats / Metric Highlights -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 flex items-center space-x-4">
+                <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-lg">
+                    <i class="fa-solid fa-server text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-slate-400">Active Stores</div>
+                    <div class="text-2xl font-bold text-white" id="activeStoresCount">0</div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 flex items-center space-x-4">
+                <div class="p-3 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                    <i class="fa-solid fa-bolt text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-slate-400">Action Queries</div>
+                    <div class="text-2xl font-bold text-white" id="actionQueriesCount">0</div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 flex items-center space-x-4">
+                <div class="p-3 bg-amber-500/10 text-amber-400 rounded-lg">
+                    <i class="fa-solid fa-hand text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-slate-400">Left-Hand Queries</div>
+                    <div class="text-2xl font-bold text-white" id="lhoQueriesCount">0</div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 flex items-center space-x-4">
+                <div class="p-3 bg-pink-500/10 text-pink-400 rounded-lg">
+                    <i class="fa-solid fa-calculator text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-slate-400">Operator Queries</div>
+                    <div class="text-2xl font-bold text-white" id="operatorQueriesCount">0</div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 flex items-center space-x-4">
+                <div class="p-3 bg-purple-500/10 text-purple-400 rounded-lg">
+                    <i class="fa-solid fa-users text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-slate-400">Actor Queries</div>
+                    <div class="text-2xl font-bold text-white" id="actorQueriesCount">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section: Active Client Stores -->
+        <section class="bg-slate-800/40 border border-slate-800 rounded-2xl p-6 backdrop-blur">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-memory text-sky-400"></i>
+                    <h2 class="text-lg font-semibold text-white">Active Client Stores</h2>
+                </div>
+                <span class="text-xs text-slate-400">Isolated Graph Memory Sessions</span>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-slate-700/50 bg-slate-900/60">
+                <table class="w-full text-left text-sm text-slate-300">
+                    <thead class="bg-slate-800/80 text-xs uppercase font-semibold text-slate-400 border-b border-slate-700/50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3.5">Client Identifier</th>
+                            <th scope="col" class="px-6 py-3.5">Last Accessed Timestamp</th>
+                            <th scope="col" class="px-6 py-3.5">Formatted Date / Time</th>
+                            <th scope="col" class="px-6 py-3.5 text-right">Triple Count</th>
+                        </tr>
+                    </thead>
+                    <tbody id="storesTableBody" class="divide-y divide-slate-800/60">
+                        <tr>
+                            <td colspan="4" class="px-6 py-8 text-center text-slate-500 italic">
+                                Loading graph stores...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Section: SPARQL Queries Grouped Cards -->
+        <section class="space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-code text-indigo-400"></i>
+                    <span>Registered SPARQL Query Keys</span>
+                </h2>
+                <span class="text-xs text-slate-400">Configured in SPARQL.py</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Action Queries Card -->
+                <div class="bg-slate-800/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition">
+                    <div>
+                        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/40">
+                            <h3 class="font-semibold text-indigo-300 flex items-center gap-2">
+                                <i class="fa-solid fa-bolt text-indigo-400 text-sm"></i>
+                                Action Queries
+                            </h3>
+                            <span id="badgeActions" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">0</span>
+                        </div>
+                        <ul id="listActions" class="space-y-2 text-sm text-slate-300 font-mono">
+                            <li class="text-slate-500 italic font-sans text-xs">No queries loaded.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Left-Hand Operand Queries Card -->
+                <div class="bg-slate-800/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition">
+                    <div>
+                        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/40">
+                            <h3 class="font-semibold text-amber-300 flex items-center gap-2">
+                                <i class="fa-solid fa-hand text-amber-400 text-sm"></i>
+                                Left-Hand Operand Queries
+                            </h3>
+                            <span id="badgeLeft" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">0</span>
+                        </div>
+                        <ul id="listLeft" class="space-y-2 text-sm text-slate-300 font-mono">
+                            <li class="text-slate-500 italic font-sans text-xs">No queries loaded.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Operator Queries Card -->
+                <div class="bg-slate-800/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition">
+                    <div>
+                        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/40">
+                            <h3 class="font-semibold text-pink-300 flex items-center gap-2">
+                                <i class="fa-solid fa-calculator text-pink-400 text-sm"></i>
+                                Operator Queries
+                            </h3>
+                            <span id="badgeOperators" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20">0</span>
+                        </div>
+                        <ul id="listOperators" class="space-y-2 text-sm text-slate-300 font-mono">
+                            <li class="text-slate-500 italic font-sans text-xs">No queries loaded.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Actor Queries Card -->
+                <div class="bg-slate-800/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition">
+                    <div>
+                        <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/40">
+                            <h3 class="font-semibold text-purple-300 flex items-center gap-2">
+                                <i class="fa-solid fa-users text-purple-400 text-sm"></i>
+                                Actor Queries
+                            </h3>
+                            <span id="badgeActors" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">0</span>
+                        </div>
+                        <ul id="listActors" class="space-y-2 text-sm text-slate-300 font-mono">
+                            <li class="text-slate-500 italic font-sans text-xs">No queries loaded.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 py-4 text-center text-xs text-slate-500">
+        Abstract ODRL Editor API Status Dashboard &bull; Powered by FastAPI & PyOxigraph
+    </footer>
+
+    <!-- Client JavaScript Logic -->
+    <script>
+        async function fetchStatus() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const refreshIcon = document.getElementById('refreshIcon');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const connectionStatus = document.getElementById('connectionStatus');
+
+            // UI loading state
+            refreshIcon.classList.add('fa-spin');
+            refreshBtn.disabled = true;
+
+            try {
+                // Fetch status from API endpoint
+                const response = await fetch('http://localhost:8005/api/get_status');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Update Status Indicator
+                statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
+                statusText.innerText = 'Online';
+                statusText.className = 'text-emerald-400 font-semibold';
+                connectionStatus.className = 'flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+
+                // Render Active Stores Table
+                renderStores(data.current_stores || []);
+
+                // Render SPARQL Query Keys
+                const queries = data.sparql_queries || {};
+                renderQueryList('listActions', 'badgeActions', 'actionQueriesCount', queries.ACTION_QUERIES || []);
+                renderQueryList('listLeft', 'badgeLeft', 'lhoQueriesCount', queries.LEFT_HAND_OPERAND_QUERIES || []);
+                renderQueryList('listOperators', 'badgeOperators', 'operatorQueriesCount', queries.OPERATOR_QUERIES || []);
+                renderQueryList('listActors', 'badgeActors', 'actorQueriesCount', queries.ACTOR_QUERIES || []);
+
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+                
+                // UI Error State
+                statusDot.className = 'w-2 h-2 rounded-full bg-rose-500';
+                statusText.innerText = 'Offline / Error';
+                statusText.className = 'text-rose-400 font-semibold';
+                connectionStatus.className = 'flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20';
+
+                document.getElementById('storesTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-6 py-6 text-center text-rose-400">
+                            <i class="fa-solid fa-triangle-exclamation mr-2"></i> Failed to connect to server backend.
+                        </td>
+                    </tr>
+                `;
+            } finally {
+                refreshIcon.classList.remove('fa-spin');
+                refreshBtn.disabled = false;
+            }
+        }
+
+        function renderStores(stores) {
+            const tableBody = document.getElementById('storesTableBody');
+            document.getElementById('activeStoresCount').innerText = stores.length;
+
+            if (stores.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-6 py-6 text-center text-slate-500 italic">
+                            No active client stores in memory.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tableBody.innerHTML = stores.map(store => {
+                const ts = store.latest_timestamp;
+                const formattedDate = ts ? new Date(ts * 1000).toLocaleString() : 'N/A';
+                const tripleCount = store.triple_count !== undefined ? store.triple_count : 'N/A';
+
+                return `
+                    <tr class="hover:bg-slate-800/50 transition">
+                        <td class="px-6 py-4 font-mono text-sky-400 font-medium">
+                            <i class="fa-solid fa-fingerprint mr-2 text-slate-500"></i>${escapeHtml(store.client_id)}
+                        </td>
+                        <td class="px-6 py-4 font-mono text-slate-400 text-xs">
+                            ${ts ? ts.toFixed(3) : 'N/A'}
+                        </td>
+                        <td class="px-6 py-4 text-slate-300">
+                            <i class="fa-regular fa-clock mr-1.5 text-slate-500 text-xs"></i>${formattedDate}
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <span class="px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-700">
+                                ${tripleCount} triples
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderQueryList(elementId, badgeId, summaryMetricId, keys) {
+            const listEl = document.getElementById(elementId);
+            const badgeEl = document.getElementById(badgeId);
+            const metricEl = document.getElementById(summaryMetricId);
+
+            badgeEl.innerText = keys.length;
+            if (metricEl) metricEl.innerText = keys.length;
+
+            if (keys.length === 0) {
+                listEl.innerHTML = `<li class="text-slate-500 italic font-sans text-xs">No keys registered.</li>`;
+                return;
+            }
+
+            listEl.innerHTML = keys.map(key => `
+                <li class="flex items-center space-x-2 bg-slate-900/80 px-3 py-2 rounded-lg border border-slate-700/50 text-slate-200">
+                    <i class="fa-solid fa-key text-slate-500 text-xs"></i>
+                    <span>${escapeHtml(key)}</span>
+                </li>
+            `).join('');
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Fetch on load
+        window.onload = fetchStatus;
+    </script>
+</body>
+</html>

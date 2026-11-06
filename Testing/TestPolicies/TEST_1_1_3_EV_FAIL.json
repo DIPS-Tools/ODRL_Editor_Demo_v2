@@ -1,0 +1,11 @@
+{
+  "http://www.w3.org/ns/odrl/2/Action": "http://www.w3.org/ns/odrl/2/use",
+  "http://www.w3.org/ns/odrl/2/Party": "https://w3id.org/dpv/owl#Entity",
+  "http://www.w3.org/ns/odrl/2/Asset": "https://dips.soton.ac.uk/test-ns/DatasetOne",
+  "http://www.w3.org/ns/odrl/2/language": "en",
+  "http://www.w3.org/ns/odrl/2/elapsedTime": "15",
+  "http://www.w3.org/ns/odrl/2/version": "2",
+  "http://www.w3.org/ns/odrl/2/industry": "Academy",
+  "http://www.w3.org/ns/odrl/2/delayPeriod": "10",
+  "http://www.w3.org/ns/odrl/2/relativeSize": 54
+}

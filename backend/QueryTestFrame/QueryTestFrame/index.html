@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ODRL SPARQL QUERY Explorer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .panel {
+            flex: 1;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        ul {
+            list-style-type: none;
+            padding-left: 20px;
+        }
+        li {
+            margin: 8px 0;
+            padding: 6px;
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .node-path {
+            font-weight: bold;
+            color: #0284c7;
+        }
+        .node-uri {
+            font-size: 0.85em;
+            color: #64748b;
+            word-break: break-all;
+        }
+        .node-def {
+            font-size: 0.9em;
+            color: #334155;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 0.85em;
+            overflow-x: auto;
+        }
+        button {
+            background: #0284c7;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 15px;
+        }
+        button:hover {
+            background: #0369a1;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>ODRL SPARQL QUERY Explorer</h1>
+    <p>This page calls your FastAPI backend at <code>http://127.0.0.1:8010/getXXXXX</code> and renders the results.</p>
+    
+    <button onclick="fetchActions()">Load Actions</button>
+	<button onclick="fetchLeftHandOperands()">Left Hand Ops</button>
+	<button onclick="fetchRelatedLeftHandOperands()">Related Left Hand Ops</button>
+	<button onclick="fetchOperators()">Operators</button>
+	<button onclick="fetchRelatedOperators()">Related Operators</button>
+	<button onclick="fetchParty()">Assignee/er</button>
+
+    <div class="container">
+        <!-- Panel 1: Tree / Leaf-down View -->
+        <div class="panel">
+            <h2>Hierarchy View</h2>
+            <div id="tree-container">Click "Load Actions" to view data...</div>
+        </div>
+
+        <!-- Panel 2: Raw JSON Response View -->
+        <div class="panel">
+            <h2>Raw JSON Payload</h2>
+            <pre id="json-container">Waiting for data...</pre>
+        </div>
+    </div>
+
+    <script>
+	    // Asynchronously gets or registers a persistent anonymous client session ID from the server
+        async function getClientId() {
+            let clientId = localStorage.getItem('odrl_client_id');
+            if (!clientId) {
+                try {
+                    const response = await fetch('http://127.0.0.1:8010/register', {
+                        method: 'POST'
+                    });
+                    if (!response.ok) {
+                        throw new Error(`Server registration failed with status ${response.status}`);
+                    }
+                    const data = await response.json();
+                    clientId = data.client_id;
+                    localStorage.setItem('odrl_client_id', clientId);
+                    console.log("Registered new session with server:", clientId);
+                } catch (error) {
+                    console.error("Could not reach server for registration, falling back to client-side UUID:", error);
+                    clientId = 'client_' + crypto.randomUUID();
+                    localStorage.setItem('odrl_client_id', clientId);
+                }
+            }
+            return clientId;
+        }
+		
+        async function fetchActions() {
+            // Prompt user for a plan number, defaulting to 0
+            const planName = prompt("Enter plan name:", "DEFAULT_ACTION_QUERY");
+            if (planName === null) return; // User cancelled the prompt
+            
+            const trimmedPlanName = planName.trim();
+            if (!trimmedPlanName) {
+                alert("Plan name cannot be empty.");
+                return;
+            }
+
+            const treeContainer = document.getElementById('tree-container');
+            const jsonContainer = document.getElementById('json-container');
+            
+            treeContainer.innerHTML = "Loading...";
+            jsonContainer.innerHTML = "Loading...";
+
+            try {
+			
+			    const clientId = await getClientId();
+
+                const response = await fetch(`http://127.0.0.1:8010/getActions?plan_name=${encodeURIComponent(trimmedPlanName)}&client_id=${encodeURIComponent(clientId)}`);
+                // Pass plan_number as the parameter to getActions
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // 1. Display Raw JSON
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
+
+                // 2. Build Tree/Leaf-down UI from actions array
+                if (!data.actions || data.actions.length === 0) {
+                    treeContainer.innerHTML = "<p>No actions found in graph.</p>";
+                    return;
+                }
+
+                let html = '<ul>';
+                data.actions.forEach(item => {
+                    const path = item[0];
+                    const uri = item[1];
+                    const definition = item[2];
+
+                    html += `
+                        <li>
+                            <div class="node-path">📌 ${path}</div>
+                            <div class="node-uri"><strong>URI:</strong> <a href="${uri}" target="_blank">${uri}</a></div>
+                            <div class="node-def"><strong>Definition:</strong> ${definition}</div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                
+                treeContainer.innerHTML = html;
+
+            } catch (error) {
+                treeContainer.innerHTML = `<p style="color: red;">Error connecting to API: ${error.message}</p>`;
+                jsonContainer.textContent = error.stack;
+            }
+        }
+		
+		async function fetchLeftHandOperands() {
+            const planName = prompt("Enter plan name for Left Hand Operands:", "DEFAULT_LEFT_HAND_OPERAND_QUERY");
+            if (planName === null) return;
+            
+            const trimmedPlanName = planName.trim();
+            if (!trimmedPlanName) {
+                alert("Plan name cannot be empty.");
+                return;
+            }
+
+            const treeContainer = document.getElementById('tree-container');
+            const jsonContainer = document.getElementById('json-container');
+            
+            treeContainer.innerHTML = "Loading...";
+            jsonContainer.innerHTML = "Loading...";
+
+            try {
+			    const clientId = await getClientId();
+
+                // Calls the new /getLeftHandOperands endpoint
+                const response = await fetch(`http://127.0.0.1:8010/getLeftHandOperands?plan_name=${encodeURIComponent(trimmedPlanName)}&client_id=${encodeURIComponent(clientId)}`);
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || `HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
+
+                // Handles either data.actions or data.operands depending on your backend return format
+                const items = data.actions || data.operands || [];
+                if (items.length === 0) {
+                    treeContainer.innerHTML = "<p>No left hand operands found in graph.</p>";
+                    return;
+                }
+
+                let html = '<ul>';
+                items.forEach(item => {
+                    const path = item[0];
+                    const uri = item[1];
+                    const definition = item[2];
+
+                    html += `
+                        <li>
+                            <div class="node-path">📌 ${path}</div>
+                            <div class="node-uri"><strong>URI:</strong> <a href="${uri}" target="_blank">${uri}</a></div>
+                            <div class="node-def"><strong>Definition:</strong> ${definition}</div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                
+                treeContainer.innerHTML = html;
+
+            } catch (error) {
+                treeContainer.innerHTML = `<p style="color: red;">Error connecting to API: ${error.message}</p>`;
+                jsonContainer.textContent = error.stack;
+            }
+        }
+		
+		async function fetchRelatedLeftHandOperands() {
+            // 1. Prompt for plan name
+            const planName = prompt("Enter plan name for Related Left Hand Operands:", "RELATED_LEFT_HAND_OPERAND_QUERY");
+            if (planName === null) return;
+            const trimmedPlanName = planName.trim();
+            if (!trimmedPlanName) {
+                alert("Plan name cannot be empty.");
+                return;
+            }
+
+            // 2. Prompt for class URI
+            const classUri = prompt("Enter target Class URI (e.g., http://www.w3.org/ns/odrl/2/Action):", "http://example.org/CorrelationAnalysis");
+            if (classUri === null) return;
+            const trimmedClassUri = classUri.trim();
+            if (!trimmedClassUri) {
+                alert("Class URI cannot be empty.");
+                return;
+            }
+
+            const treeContainer = document.getElementById('tree-container');
+            const jsonContainer = document.getElementById('json-container');
+            
+            treeContainer.innerHTML = "Loading...";
+            jsonContainer.innerHTML = "Loading...";
+
+            try {
+			    const clientId = await getClientId();
+
+                // 3. Call endpoint with both parameters
+                const url = `http://127.0.0.1:8010/getRelatedLeftHandOperands?plan_name=${encodeURIComponent(trimmedPlanName)}&class_uri=${encodeURIComponent(trimmedClassUri)}&client_id=${encodeURIComponent(clientId)}`;
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || `HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
+
+                const items = data.actions || data.operands || [];
+                if (items.length === 0) {
+                    treeContainer.innerHTML = "<p>No related left hand operands found for this class URI.</p>";
+                    return;
+                }
+
+                let html = '<ul>';
+                items.forEach(item => {
+                    const path = item[0];
+                    const uri = item[1];
+                    const definition = item[2];
+
+                    html += `
+                        <li>
+                            <div class="node-path">📌 ${path}</div>
+                            <div class="node-uri"><strong>URI:</strong> <a href="${uri}" target="_blank">${uri}</a></div>
+                            <div class="node-def"><strong>Definition:</strong> ${definition}</div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                
+                treeContainer.innerHTML = html;
+
+            } catch (error) {
+                treeContainer.innerHTML = `<p style="color: red;">Error connecting to API: ${error.message}</p>`;
+                jsonContainer.textContent = error.stack;
+            }
+        }
+		
+		async function fetchOperators() {
+            const planName = prompt("Enter plan name for Operators:", "DEFAULT_OPERATOR_QUERY");
+            if (planName === null) return;
+            
+            const trimmedPlanName = planName.trim();
+            if (!trimmedPlanName) {
+                alert("Plan name cannot be empty.");
+                return;
+            }
+
+            const treeContainer = document.getElementById('tree-container');
+            const jsonContainer = document.getElementById('json-container');
+            
+            treeContainer.innerHTML = "Loading...";
+            jsonContainer.innerHTML = "Loading...";
+
+            try {
+			    const clientId = await getClientId();
+
+                // Calls the new /getLeftHandOperands endpoint
+                const response = await fetch(`http://127.0.0.1:8010/getOperators?plan_name=${encodeURIComponent(trimmedPlanName)}&client_id=${encodeURIComponent(clientId)}`);
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || `HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
+
+                // Handles either data.actions or data.operands depending on your backend return format
+                const items = data.actions || data.operands || [];
+                if (items.length === 0) {
+                    treeContainer.innerHTML = "<p>No operators found in graph.</p>";
+                    return;
+                }
+
+                let html = '<ul>';
+                items.forEach(item => {
+                    const path = item[0];
+                    const uri = item[1];
+                    const definition = item[2];
+
+                    html += `
+                        <li>
+                            <div class="node-path">📌 ${path}</div>
+                            <div class="node-uri"><strong>URI:</strong> <a href="${uri}" target="_blank">${uri}</a></div>
+                            <div class="node-def"><strong>Definition:</strong> ${definition}</div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                
+                treeContainer.innerHTML = html;
+
+            } catch (error) {
+                treeContainer.innerHTML = `<p style="color: red;">Error connecting to API: ${error.message}</p>`;
+                jsonContainer.textContent = error.stack;
+            }
+        }
+		
+		async function fetchRelatedOperators() {
+            // 1. Prompt for plan name
+            const planName = prompt("Enter plan name for Related Operators:", "RELATED_OPERATOR_QUERY");
+            if (planName === null) return;
+            const trimmedPlanName = planName.trim();
+            if (!trimmedPlanName) {
+                alert("Plan name cannot be empty.");
+                return;
+            }
+
+            // 2. Prompt for class URI
+            const classUri = prompt("Enter target Class URI (e.g., https://w3id.org/gds#Name):", "https://w3id.org/gds#Name");
+            if (classUri === null) return;
+            const trimmedClassUri = classUri.trim();
+            if (!trimmedClassUri) {
+                alert("Class URI cannot be empty.");
+                return;
+            }
+
+            const treeContainer = document.getElementById('tree-container');
+            const jsonContainer = document.getElementById('json-container');
+            
+            treeContainer.innerHTML = "Loading...";
+            jsonContainer.innerHTML = "Loading...";
+
+            try {
+			    const clientId = await getClientId();
+
+                // 3. Call endpoint with both parameters
+                const url = `http://127.0.0.1:8010/getRelatedOperators?plan_name=${encodeURIComponent(trimmedPlanName)}&class_uri=${encodeURIComponent(trimmedClassUri)}&client_id=${encodeURIComponent(clientId)}`;
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || `HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
+
+                const items = data.actions || data.operands || [];
+                if (items.length === 0) {
+                    treeContainer.innerHTML = "<p>No related left hand operands found for this class URI.</p>";
+                    return;
+                }
+
+                let html = '<ul>';
+                items.forEach(item => {
+                    const path = item[0];
+                    const uri = item[1];
+                    const definition = item[2];
+
+                    html += `
+                        <li>
+                            <div class="node-path">📌 ${path}</div>
+                            <div class="node-uri"><strong>URI:</strong> <a href="${uri}" target="_blank">${uri}</a></div>
+                            <div class="node-def"><strong>Definition:</strong> ${definition}</div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                
+                treeContainer.innerHTML = html;
+
+            } catch (error) {
+                treeContainer.innerHTML = `<p style="color: red;">Error connecting to API: ${error.message}</p>`;
+                jsonContainer.textContent = error.stack;
+            }
+        }
+		
+		async function fetchParty() {
+            const planName = prompt("Enter plan name for Parties:", "DEFAULT_ACTOR_QUERY");
+            if (planName === null) return;
+            
+            const trimmedPlanName = planName.trim();
+            if (!trimmedPlanName) {
+                alert("Plan name cannot be empty.");
+                return;
+            }
+
+            const treeContainer = document.getElementById('tree-container');
+            const jsonContainer = document.getElementById('json-container');
+            
+            treeContainer.innerHTML = "Loading...";
+            jsonContainer.innerHTML = "Loading...";
+
+            try {
+			    const clientId = await getClientId();
+
+                // Calls the new /getLeftHandOperands endpoint
+                const response = await fetch(`http://127.0.0.1:8010/getActors?plan_name=${encodeURIComponent(trimmedPlanName)}&client_id=${encodeURIComponent(clientId)}`);
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || `HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                jsonContainer.textContent = JSON.stringify(data, null, 2);
+
+                // Handles either data.actions or data.operands depending on your backend return format
+                const items = data.actions || data.operands || [];
+                if (items.length === 0) {
+                    treeContainer.innerHTML = "<p>No left hand operands found in graph.</p>";
+                    return;
+                }
+
+                let html = '<ul>';
+                items.forEach(item => {
+                    const path = item[0];
+                    const uri = item[1];
+                    const definition = item[2];
+
+                    html += `
+                        <li>
+                            <div class="node-path">📌 ${path}</div>
+                            <div class="node-uri"><strong>URI:</strong> <a href="${uri}" target="_blank">${uri}</a></div>
+                            <div class="node-def"><strong>Definition:</strong> ${definition}</div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                
+                treeContainer.innerHTML = html;
+
+            } catch (error) {
+                treeContainer.innerHTML = `<p style="color: red;">Error connecting to API: ${error.message}</p>`;
+                jsonContainer.textContent = error.stack;
+            }
+        }
+	
+    </script>
+</body>
+</html>

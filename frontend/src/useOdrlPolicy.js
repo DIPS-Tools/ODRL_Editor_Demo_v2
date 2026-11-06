@@ -4,9 +4,15 @@ import { useState, useEffect } from 'react';
  * Custom hook to manage ODRL policy state, server synchronization, 
  * vocabulary data fetching, and JSON-LD compilation.
  */
-export function useOdrlPolicy({ customUris = [] } = {}) {
+export function useOdrlPolicy({ customUris = [], 
+actionQuery = "DEFAULT_ACTION_QUERY",
+lhoQuery = "DEFAULT_LEFT_HAND_OPERAND_QUERY",
+opQuery = "DEFAULT_OPERATOR_QUERY",
+actorQuery = "DEFAULT_ACTOR_QUERY" 
+} = {}) {
   // Use an object structure for tracking active rules across permissions and prohibitions
   const [activePermissionIdx, setActivePermissionIdx] = useState({ type: 'permission', idx: 0 });
+  const [clientId, setClientId] = useState(null);
 
   // Vocabulary feature state
   const [showVocabModal, setShowVocabModal] = useState(false);
@@ -67,31 +73,110 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
   };
 
   // Fetch dynamic vocabulary rules graphs via endpoints
+  // Updated fetchGraphVocabularies matching the new endpoint signatures
   const fetchGraphVocabularies = async () => {
+    if (!clientId) return;
     try {
-      const [actRes, purRes, leftRes, opRes, rightRes, actorRes] = await Promise.all([
-        fetch('api/actions'),
-        fetch('api/purposes'),
-        fetch('api/leftOperands'),
-        fetch('api/operators'),
-        fetch('api/rightOperands'),
-		fetch('api/actors')
+      const [
+        actRes, 
+        leftRes, 
+        relLeftRes, 
+        opRes, 
+        relOpRes, 
+        actorRes
+      ] = await Promise.all([
+        fetch(`api/getActions?plan_name=${encodeURIComponent(actionQuery)}&client_id=${encodeURIComponent(clientId)}`),
+        fetch(`api/getLeftHandOperands?plan_name=${encodeURIComponent(lhoQuery)}&client_id=${encodeURIComponent(clientId)}`),
+        fetch(`api/getRelatedLeftHandOperands?plan_name=${encodeURIComponent(lhoQuery)}&class_uri=${encodeURIComponent('http://www.w3.org/ns/odrl/2/LeftOperand')}&client_id=${encodeURIComponent(clientId)}`),
+        fetch(`api/getOperators?plan_name=${encodeURIComponent(opQuery)}&client_id=${encodeURIComponent(clientId)}`),
+        fetch(`api/getRelatedOperators?plan_name=${encodeURIComponent(opQuery)}&class_uri=${encodeURIComponent('http://www.w3.org/ns/odrl/2/Operator')}&client_id=${encodeURIComponent(clientId)}`),
+        fetch(`api/getActors?plan_name=${encodeURIComponent(actorQuery)}&client_id=${encodeURIComponent(clientId)}`)
       ]);
 
-      if (actRes.ok) setDbActions(await actRes.json());
-      if (purRes.ok) setDbPurposes(await purRes.json());
-      if (leftRes.ok) setDbLeftOperands(await leftRes.json());
-      if (opRes.ok) setDbOperators(await opRes.json());
-      if (rightRes.ok) setDbRightOperands(await rightRes.json());
-	  if (actorRes.ok) setDbActors(await actorRes.json());
+      if (actRes.ok) {
+        const actData = await actRes.json();
+        setDbActions(actData.actions || actData);
+      }
+      if (leftRes.ok) {
+        const leftData = await leftRes.json();
+        setDbLeftOperands(leftData.actions || leftData);
+      }
+      if (relLeftRes.ok) {
+        const relLeftData = await relLeftRes.json();
+        // Handle related left hand operands data if needed
+      }
+      if (opRes.ok) {
+        const opData = await opRes.json();
+        setDbOperators(opData.actions || opData);
+      }
+      if (relOpRes.ok) {
+        const relOpData = await relOpRes.json();
+        // Handle related operators data if needed
+      }
+      if (actorRes.ok) {
+        const actorData = await actorRes.json();
+        setDbActors(actorData.actions || actorData);
+      }
     } catch (err) {
       console.error("Could not fetch graph vocabularies:", err);
     }
   };
+  
+  // Reset vocabularies whenever policy.profile or clientId changes
+  useEffect(() => {
+    if (!clientId) return;
 
+    const resetVocabs = async () => {
+      try {
+        const response = await fetch('api/vocabularies/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            profiles: policy.profile,
+            client_id: clientId 
+          })
+        });
+        
+        if (response.ok) {
+           fetchServerFiles();
+           fetchGraphVocabularies();
+        }
+      } catch (e) {
+        console.error("Failed to update server vocabularies:", e);
+      }
+    };
+    
+    resetVocabs();
+  }, [policy.profile, clientId]);
+  
+  useEffect(() => {
+    if (clientId) {
+      fetchGraphVocabularies();
+    }
+  }, [clientId, actionQuery, lhoQuery, opQuery, actorQuery]);
+  
+  // Register client on mount to obtain unique client_id
+  useEffect(() => {
+    const registerClient = async () => {
+      try {
+        const res = await fetch('api/register', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.client_id) {
+            setClientId(data.client_id);
+            console.log("Registered client_id successfully:", data.client_id);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to register client:", err);
+      }
+    };
+    registerClient();
+  }, []);
+  
   useEffect(() => {
     fetchGraphVocabularies();
-  }, []);
+  }, [actionQuery]);
 
   /// Helper builder for constraints mapping supporting nested logical groups with validation
   const buildConstraintsObj = (constraints) => {
@@ -101,11 +186,12 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
       if (item.isGroup || item.type === 'group') {
         const logicalOp = item.logicalOp || item.operator || 'and';
         
-		if (logicalOp === 'and') {
+		const validLogicalOps = ['and', 'or', 'xone', 'andSequence'];
+        if (validLogicalOps.includes(item.logicalOp)){
 	      // Use "@list" wrapper only for 'and'
 		  return {
             "@type": "odrl:LogicalConstraint",
-             "odrl:and": {
+             [`odrl:${logicalOp}`]: {
                "@list": buildConstraintsObj(item.constraints) || []
              }
           };
@@ -433,12 +519,12 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
 		  if (prohib.target?.name) {
             const targetConstraints = buildConstraintsObj(prohib.target.constraints);
             if (targetConstraints) {
-              prObj.target = {
+              prObj["odrl:target"] = {
                 "odrl:source": prohib.target.name,
                 "odrl:refinement": targetConstraints
               };
             } else {
-              prObj.target = prohib.target.name;
+			  prObj["odrl:target"] = { "@id": prohib.target.name};
             }
           }
 
@@ -601,16 +687,16 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
           if (obl.action?.name) {
             obObj["odrl:action"] = buildActionObj(obl.action);
           }
-
+		  
           if (obl.target?.name) {
             const targetConstraints = buildConstraintsObj(obl.target.constraints);
             if (targetConstraints) {
-              obObj.target = {
+			  obObj["odrl:target"] = {
                 "odrl:source": obl.target.name,
                 "odrl:refinement": targetConstraints
               };
             } else {
-              obObj.target = obl.target.name;
+			  obObj["odrl:target"] = { "@id": obl.target.name};
             }
           }
 
@@ -829,6 +915,7 @@ export function useOdrlPolicy({ customUris = [] } = {}) {
     shaclResult, showShaclReport, setShowShaclReport,
     serverFiles, showDropdown, setShowDropdown,
     dbActions, dbPurposes, dbLeftOperands, dbOperators, dbRightOperands, dbActors,
-    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl, fetchGraphVocabularies
+    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl, fetchGraphVocabularies,
+    clientId
   };
 }

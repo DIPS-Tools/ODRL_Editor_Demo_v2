@@ -13,19 +13,7 @@ export default function OdrlEditor() {
 	customUris: [],               // <--- Array to hold custom URIs
   });
   
-  const {
-    activePermissionIdx, setActivePermissionIdx,
-    showVocabModal, setShowVocabModal,
-    vocabOutput, setVocabOutput,
-    policy, setPolicy,
-    jsonLd, backendStatus,
-    shaclResult, showShaclReport, setShowShaclReport,
-    serverFiles, showDropdown, setShowDropdown,
-    dbActions, dbPurposes, dbLeftOperands, dbOperators, dbActors,
-    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl,
-    fetchGraphVocabularies
-	// NEXT { editorSettings }
-  } = useOdrlPolicy({ customUris: editorSettings.customUris });
+ 
   
   
 
@@ -80,6 +68,83 @@ export default function OdrlEditor() {
     return false; // Default visibility when the parameter is not specified
   });
   
+  const [templateMode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('templateMode');
+    if (param !== null) {
+      return param === 'true' || param === '1';
+    }
+    return false; // Default visibility when the parameter is not specified
+  });
+    
+  const [actionQuery] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('actionQuery');
+    if (param !== null) {
+      return param;
+    }
+    return "DEFAULT_ACTION_QUERY"; // Default query when the parameter is not specified
+  });
+  
+    
+  const [lhoQuery] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('lhoQuery');
+    if (param !== null) {
+      return param;
+    }
+    return "DEFAULT_LEFT_HAND_OPERAND_QUERY"; // Default query when the parameter is not specified
+  });
+  
+  const [lhoClassQuery] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('lhoClassQuery');
+    if (param !== null) {
+      return param;
+    }
+    // return "RELATED_LEFT_HAND_OPERAND_QUERY"; // Default query when the parameter is not specified
+	return "DEFAULT_LEFT_HAND_OPERAND_QUERY"; // Default query when the parameter is not specified
+  });
+  
+  const [opQuery] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('opQuery');
+    if (param !== null) {
+      return param;
+    }
+    return "DEFAULT_OPERATOR_QUERY"; // Default query when the parameter is not specified
+  });
+  
+    
+  const [actorQuery] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('actorQuery');
+    if (param !== null) {
+      return param;
+    }
+    return "DEFAULT_ACTOR_QUERY"; // Default query when the parameter is not specified
+  });
+ 
+  
+   const {
+    activePermissionIdx, setActivePermissionIdx,
+    showVocabModal, setShowVocabModal,
+    vocabOutput, setVocabOutput,
+    policy, setPolicy,
+    jsonLd, backendStatus,
+    shaclResult, showShaclReport, setShowShaclReport,
+    serverFiles, showDropdown, setShowDropdown,
+    dbActions, dbPurposes, dbLeftOperands, dbOperators, dbActors,
+    fetchServerFiles, handleLoadServerPolicy, handlePublish, handleValidateShacl,
+    fetchGraphVocabularies,
+	clientId
+	// NEXT { editorSettings }
+  } = useOdrlPolicy({ customUris: editorSettings.customUris, 
+                 actionQuery,
+                 lhoQuery,
+                 opQuery,
+                 actorQuery });
+  
   // State for magnifying glass floating modal
   const [showMagnifyModal, setShowMagnifyModal] = useState(false);
 
@@ -92,6 +157,133 @@ export default function OdrlEditor() {
   // Ref for hidden file input used in uploading a local policy file
   const fileInputRef = useRef(null);
 
+  // START : Additions for LHO operand handling
+  // State to cache related left hand operands per action URI
+  const [actionLhoCache, setActionLhoCache] = useState({});
+  const [actorLhoCache, setActorLhoCache] = useState({});
+
+  // Helper function that executes the fetch call to api/getRelatedLeftHandOperands:
+  const fetchRelatedLeftHandOperands = async (actionUri) => {
+    if (!clientId || !actionUri) return;
+    // if (actionLhoCache[actionUri]) return; // Skip if already cached
+    try {
+      const response = await fetch(
+        `api/getRelatedLeftHandOperands?plan_name=${encodeURIComponent(lhoClassQuery)}&class_uri=${encodeURIComponent(actionUri)}&client_id=${encodeURIComponent(clientId)}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const operands = Array.isArray(data) ? data : (data.actions || data.operands || data.results || []);
+        setActionLhoCache(prev => ({ ...prev, [actionUri]: operands }));
+        console.log("Related action left hand operands fetched successfully for:", actionUri, operands);
+      }
+    } catch (err) {
+      console.error("Failed to fetch related left hand operands:", err);
+    }
+  };
+  
+  // Helper function that executes the fetch call to api/getRelatedActorLeftHandOperands:
+  const fetchRelatedActorLeftHandOperands = async (actorUri) => {
+    if (!clientId || !actorUri) return;
+    // if (actorLhoCache[actionUri]) return; // Skip if already cached
+    try {
+      const response = await fetch(
+        `api/getRelatedLeftHandOperands?plan_name=${encodeURIComponent(lhoClassQuery)}&class_uri=${encodeURIComponent(actorUri)}&client_id=${encodeURIComponent(clientId)}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const operands = Array.isArray(data) ? data : (data.actions || data.operands || data.results || []);
+        setActorLhoCache(prev => ({ ...prev, [actorUri]: operands }));
+        console.log("Related actor left hand operands fetched successfully for:", actorUri, operands);
+      }
+    } catch (err) {
+      console.error("Failed to fetch related left hand operands:", err);
+    }
+  };
+
+  // --- Session Heartbeat Effect ---
+  React.useEffect(() => {
+    if (!clientId) return;
+
+    // Interval duration: e.g., every 15 minutes (15 * 60 * 1000 ms)
+    const HEARTBEAT_INTERVAL = 30 * 60 * 1000; 
+	// const HEARTBEAT_INTERVAL = 1 * 60 * 1000; 
+
+    const sendHeartbeat = async () => {
+      try {
+        const response = await fetch(`api/heartbeat?client_id=${encodeURIComponent(clientId)}`, {
+          method: 'POST',
+        });
+        
+        if (!response.ok) {
+          console.warn("Heartbeat failed or session expired on server.");
+        } else {
+          console.log("Session heartbeat sent successfully for:", clientId);
+        }
+      } catch (err) {
+        console.error("Network error while sending session heartbeat:", err);
+      }
+    };
+
+    const intervalId = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
+
+    // Cleanup interval on component unmount or if clientId changes
+    return () => clearInterval(intervalId);
+  }, [clientId]);
+  
+  // Automatically pre-fetch related left-hand operands for any actions and actors present in the policy (e.g. after file upload or server load)
+  React.useEffect(() => {
+    if (!clientId) return;
+    const actionsToFetch = new Set();
+	const actorsToFetch = new Set();
+    
+    (policy.permissions || []).forEach(p => {
+      if (p.action?.name) actionsToFetch.add(p.action.name);
+	  if (p.actor?.type) actorsToFetch.add(p.actor.type);
+	  
+      (p.duties || []).forEach(d => {
+        if (d.action) actionsToFetch.add(d.action);
+        if (d.actionObj?.name) actionsToFetch.add(d.actionObj.name);
+		if (d.actor) actorsToFetch.add(d.actor);
+        if (d.actorObj?.type) actorsToFetch.add(d.actorObj.name);
+      });
+    });
+    (policy.prohibitions || []).forEach(p => {
+      if (p.action?.name) actionsToFetch.add(p.action.name);
+	  if (p.actor?.type) actorsToFetch.add(p.actor.type);
+	  
+      (p.duties || []).forEach(d => {
+        if (d.action) actionsToFetch.add(d.action);
+        if (d.actionObj?.name) actionsToFetch.add(d.actionObj.name);
+		if (d.actor) actorsToFetch.add(d.actor);
+        if (d.actorObj?.type) actorsToFetch.add(d.actorObj.name);
+      });
+	  
+    });
+    (policy.obligations || []).forEach(o => {
+      if (o.action?.name) actionsToFetch.add(o.action.name);
+	  if (o.actor?.type) actorsToFetch.add(o.actor.type);
+      (o.duties || []).forEach(d => {
+        if (d.action) actionsToFetch.add(d.action);
+        if (d.actionObj?.name) actionsToFetch.add(d.actionObj.name);
+		if (d.actor) actorsToFetch.add(d.actor);
+        if (d.actorObj?.type) actorsToFetch.add(d.actorObj.name);
+      });
+    });
+
+    actionsToFetch.forEach(actionUri => {
+      if (!actionLhoCache[actionUri]) {
+        fetchRelatedLeftHandOperands(actionUri);
+      }
+    });
+	
+	actorsToFetch.forEach(actorUri => {
+      if (!actorLhoCache[actorUri]) {
+        fetchRelatedActorLeftHandOperands(actorUri);
+      }
+    });
+  }, [policy, clientId]);
+  // END 
+  
   // Asynchronous helper function to call the api/policy/to-ttl endpoint
   const convertJsonLdToTtl = async (jsonLdString) => {
     try {
@@ -272,6 +464,7 @@ export default function OdrlEditor() {
     }
   }, [jsonLd, codeViewFormat]);
   
+  /*
   React.useEffect(() => {
     const resetVocabs = async () => {
       try {
@@ -297,6 +490,7 @@ export default function OdrlEditor() {
 	
     resetVocabs();
   }, [policy.profile]);
+  */
 
   // Handler for downloading the current policy as a .json file
   const handleDownloadPolicy = () => {
@@ -419,6 +613,8 @@ export default function OdrlEditor() {
     });
     return extracted;
   };
+  
+
   
   // Helper to check standard, prefixed, or full URI keys interchangeably
   const getRawField = (obj, fieldNames) => {
@@ -993,6 +1189,10 @@ export default function OdrlEditor() {
       rule.duties[dutyIdx].actionObj = { name: value, constraints: [] };
     } else {
       rule.duties[dutyIdx].actionObj.name = value;
+	  // Clear constraints only when lhoClassQuery !== "DEFAULT_LEFT_HAND_OPERAND_QUERY"
+      if (lhoClassQuery !== "DEFAULT_LEFT_HAND_OPERAND_QUERY") {
+        rule.duties[dutyIdx].actionObj.constraints = [];
+      }
     }
   });
   const removeDutyBlock = (dutyIdxToRemove) => modifyDutyRule(rule => {
@@ -1314,7 +1514,8 @@ export default function OdrlEditor() {
     onAddGroup,
     onUpdateConstraint,
     onUpdateGroupOp,
-    onDeleteItem
+    onDeleteItem,
+	leftOperandOptions = dbLeftOperands // START <--- Added optional parameter
   ) => {
     if (!items || items.length === 0) {
       return <div className="text-[11px] text-slate-400 italic py-1">Empty logical constraint group.</div>;
@@ -1367,9 +1568,9 @@ export default function OdrlEditor() {
               </div>
             </div>
 
-            {/* Recursive Sub-constraints Container */}
+            {/* START last oaram Recursive Sub-constraints Container */}
             <div className="flex flex-col gap-2 pl-3 sm:pl-4 border-l-2 border-slate-400 mt-1 overflow-x-auto">
-              {renderConstraintsList(item.constraints, currentPath, onAddConstraint, onAddGroup, onUpdateConstraint, onUpdateGroupOp, onDeleteItem)}
+              {renderConstraintsList(item.constraints, currentPath, onAddConstraint, onAddGroup, onUpdateConstraint, onUpdateGroupOp, onDeleteItem, leftOperandOptions)}
             </div>
           </div>
         );
@@ -1382,7 +1583,7 @@ export default function OdrlEditor() {
           {renderLeftOperandSelect(
             item.leftOperand, 
             (e) => onUpdateConstraint(currentPath, 'leftOperand', e.target.value), 
-            dbLeftOperands
+            leftOperandOptions // <--- START Uses action-specific options when passed
           )}
           {renderOperatorSelect(
             item.operator, 
@@ -1435,9 +1636,9 @@ export default function OdrlEditor() {
       {/* Header Toolbar */}
 	  {/* Top Header Panel (Rendered conditionally based on URL parameter) */}
       {showHeader && (
-      <header className="bg-slate-600 text-white pt-1.5 pb-1 px-2 flex justify-between items-end shadow-xs z-30 relative">
+      <header className="bg-slate-200 border-b border-slate-300 text-slate-800 py-1.5 px-3 flex justify-between items-center shadow-xs z-30 relative">
         <div className="flex flex-col items-start leading-none">
-          <h1 className="font-bold tracking-wide text-[8px] uppercase mb-1">ODRL Editor</h1>
+          <h1 className="font-bold tracking-wide text-xs uppercase text-slate-900 shrink-0">ODRL Editor</h1>
           <div className="flex gap-2 items-center text-slate-800">
 		   {showLoadPolicyFromServer && (
             <div className="relative inline-block text-left text-slate-800">
@@ -1780,7 +1981,47 @@ export default function OdrlEditor() {
 
         {/* Center Panel: Rule Builder & Rule Tabs */}
         <div className="flex-1 flex flex-col gap-4 overflow-hidden h-full min-w-[400px]">
-          <section className="bg-white rounded-lg p-4 shadow overflow-y-auto border border-slate-200 flex-1 flex flex-col gap-4 relative">
+          {/* Rule Tabs Footer Navigation */}
+		  
+          <section className="bg-white rounded-lg p-3 shadow border border-slate-200 flex flex-col gap-2">
+            {!templateMode && (
+			<div className="flex items-center gap-3 border-b pb-1">
+			  
+              <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500">RULE TABS</h2>
+              <button onClick={addPermissionBlock} className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Permission</button>
+              <button onClick={addProhibitionBlock} className="bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Prohibition</button>
+              <button onClick={addObligationBlock} className="bg-amber-600 hover:bg-amber-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Obligation</button>
+            </div>
+		    )}
+            <div className="flex flex-wrap gap-2 pt-1 overflow-x-auto max-h-24">
+              {(policy.permissions?.length > 0 || policy.prohibitions?.length > 0 || policy.obligations?.length > 0) ? (
+                <>
+                  {policy.permissions?.map((_, idx) => (
+                    <button key={`perm-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'permission', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'permission' && idx === activePermissionIdx.idx ? 'bg-blue-600 text-white border-blue-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
+                      PERMISSION #{idx + 1} (Rule)
+                    </button>
+                  ))}
+                  {policy.prohibitions?.map((_, idx) => (
+                    <button key={`prohib-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'prohibition', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'prohibition' && idx === activePermissionIdx.idx ? 'bg-rose-600 text-white border-rose-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
+                      PROHIBITION #{idx + 1} (Rule)
+                    </button>
+                  ))}
+				  {policy.obligations?.map((_, idx) => (
+                    <button key={`obl-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'obligation', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'obligation' && idx === activePermissionIdx.idx ? 'bg-amber-600 text-white border-amber-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
+                      OBLIGATION #{idx + 1} (Rule)
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <span className="text-xs text-slate-400 italic py-1">No active tabs</span>
+              )}
+            </div>
+          </section>
+		 
+
+		  
+		  
+		  <section className="bg-white rounded-lg p-4 shadow overflow-y-auto border border-slate-200 flex-1 flex flex-col gap-4 relative">
             <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500 border-b pb-2">Rule Builder</h2>
             
             {/* Unified Rule Builder Panel (Permission / Prohibition / Obligation) */}
@@ -1834,6 +2075,7 @@ export default function OdrlEditor() {
                     <div className="flex justify-between items-start border-b pb-2 gap-4">
                       <div className="flex flex-col gap-1.5 flex-1 pr-6">
                         <span className={`font-bold ${badgeColorClass}`}>🔒 EDITING: {ruleTypeLabel} #{idxObj.idx + 1}</span>
+						{!templateMode && (
                         <div className="flex flex-wrap gap-2">
                           {!activeRule.assigner && <button onClick={addAssigner} className="text-xs bg-slate-600 text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assigner</button>}
                           {!activeRule.actor && <button onClick={addActor} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 transition-colors cursor-pointer font-medium shadow-sm">+ Add Assignee</button>}
@@ -1853,15 +2095,18 @@ export default function OdrlEditor() {
                             </button>
                           )}
                         </div>
+						)}
                       </div>
                     </div>
 					
 					{activeRule.uid !== null && activeRule.uid !== undefined && (
                       <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm flex flex-col gap-2">
+					    {!templateMode && (
                         <div className="flex justify-between items-center">
                           <label className="text-xs font-bold uppercase text-slate-600">Rule UID</label>
                           <button type="button" onClick={removeRuleUid} className="text-red-500 hover:text-red-700 text-xs font-bold px-1">✕</button>
                         </div>
+						)}
                         <input 
                           type="text" 
                           placeholder="e.g. urn:rule:permission-1" 
@@ -1895,15 +2140,25 @@ export default function OdrlEditor() {
                       </div>
           
                       <select className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" value={activeRule.action?.name || ''} onChange={(e) => {
+						  const newActionUri = e.target.value; // START
                         const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
                         const items = [...policy[listKey]];
                         if (!items[idxObj.idx].action) items[idxObj.idx].action = { name: '', constraints: [] };
-                        items[idxObj.idx].action.name = e.target.value;
+                        items[idxObj.idx].action.name = newActionUri;
+						
+						// Clear constraint list if lhoClassQuery is not equal to DEFAULT_LEFT_HAND_OPERAND_QUERY
+                        if (lhoClassQuery !== "DEFAULT_LEFT_HAND_OPERAND_QUERY") {
+                            items[idxObj.idx].action.constraints = [];
+                        }
+						
                         setPolicy({...policy, [listKey]: items});
+						
+						// START Call the endpoint when action is selected
+                        fetchRelatedLeftHandOperands(newActionUri);
                       }}>
                         <option value="">-- Select Action --</option>
-                        {dbActions.map(([path, uri, definition]) => (
-                          <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                        {dbActions.map(([path, uri, definition], idx) => (
+                          <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                             {path}
                           </option>
                         ))}
@@ -1917,7 +2172,9 @@ export default function OdrlEditor() {
                           (path) => addGroupAt(path, 'action'),
                           (path, field, val) => updateConstraintAt(path, field, val, 'action'),
                           (path, val) => updateGroupOperandAt(path, val, 'action'),
-                          (path) => deleteItemAt(path, 'action')
+                          (path) => deleteItemAt(path, 'action'),
+						  // START Pass action-specific left operands or fallback to dbLeftOperands
+                          activeRule.action?.name ? (actionLhoCache[activeRule.action.name] || dbLeftOperands) : dbLeftOperands
                         )}
                       </div>
                     </div>
@@ -1956,8 +2213,8 @@ export default function OdrlEditor() {
                           }}
                         >
                           <option value="">-- Select Assigner --</option>
-                          {dbActors.map(([path, uri, definition]) => (
-                            <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                          {dbActors.map(([path, uri, definition], idx) => (
+                            <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                               {path}
                             </option>
                           ))}
@@ -2006,15 +2263,28 @@ export default function OdrlEditor() {
                           className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
                           value={activeRule.actor.type} 
                           onChange={(e) => {
+							  const newActorUri = e.target.value; // START
                             const listKey = isPerm ? 'permissions' : isProhib ? 'prohibitions' : 'obligations';
                             const items = [...policy[listKey]];
-                            items[idxObj.idx].actor.type = e.target.value;
+							
+							if (!items[idxObj.idx].actor) items[idxObj.idx].actor = { type: '', constraints: [] };
+							
+                            items[idxObj.idx].actor.type = newActorUri;
+							
+							// Clear constraint list if lhoClassQuery is not equal to DEFAULT_LEFT_HAND_OPERAND_QUERY
+                            if (lhoClassQuery !== "DEFAULT_LEFT_HAND_OPERAND_QUERY") {
+                                items[idxObj.idx].actor.constraints = [];
+                            }					
+							
                             setPolicy({...policy, [listKey]: items});
+							
+							// START Call the endpoint when action is selected
+                            fetchRelatedLeftHandOperands(newActorUri);
                           }}
                         >
                           <option value="">-- Select Assignee --</option>
-                          {dbActors.map(([path, uri, definition]) => (
-                           <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                          {dbActors.map(([path, uri, definition], idx) => (
+                           <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                              {path}
                            </option>
                           ))}
@@ -2028,7 +2298,9 @@ export default function OdrlEditor() {
                             (path) => addGroupAt(path, 'assignee'),
                             (path, field, val) => updateConstraintAt(path, field, val, 'assignee'),
                             (path, val) => updateGroupOperandAt(path, val, 'assignee'),
-                            (path) => deleteItemAt(path, 'assignee')
+                            (path) => deleteItemAt(path, 'assignee'),
+							// START Pass actor-specific left operands or fallback to dbLeftOperands
+                            activeRule.actor?.type ? (actorLhoCache[activeRule.actor.type] || dbLeftOperands) : dbLeftOperands
                           )}
                         </div>
                       </div>
@@ -2210,11 +2482,17 @@ export default function OdrlEditor() {
                           <select 
                             className="w-full border p-1.5 rounded text-xs bg-white font-medium font-mono truncate" 
                             value={dutyBlock.action || ''} 
-                            onChange={(e) => updateDutyAction(dutyIdx, e.target.value)}
+                            onChange={(e) => {
+								//START
+								const newActionUri = e.target.value;
+								updateDutyAction(dutyIdx, e.target.value);
+								// START
+								fetchRelatedLeftHandOperands(newActionUri);
+							}}
                           >
                             <option value="">-- Select Action --</option>
-                            {dbActions.map(([path, uri, definition]) => (
-                              <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                            {dbActions.map(([path, uri, definition], idx) => (
+                              <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                                {path}
                               </option>
                             ))}
@@ -2229,6 +2507,8 @@ export default function OdrlEditor() {
                                 (path, field, val) => updateDutyConstraintAt(dutyIdx, 'dutyAction', path, field, val),
                                 (path, val) => updateDutyGroupOperandAt(dutyIdx, 'dutyAction', path, val),
                                 (path) => deleteDutyItemAt(dutyIdx, 'dutyAction', path)
+								// START
+								(dutyBlock.action || dutyBlock.actionObj?.name) ? (actionLhoCache[dutyBlock.action || dutyBlock.actionObj.name] || dbLeftOperands) : dbLeftOperands
                             )}
                           </div>
                         </div>
@@ -2267,8 +2547,8 @@ export default function OdrlEditor() {
                               }}
                             >
                               <option value="">-- Select Assigner --</option>
-                              {dbActors.map(([path, uri, definition]) => (
-                                <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                              {dbActors.map(([path, uri, definition], idx) => (
+                                <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                                  {path}
                                 </option>
                               ))}
@@ -2322,8 +2602,8 @@ export default function OdrlEditor() {
                               }}
                             >
                               <option value="">-- Select Assignee --</option>
-                              {dbActors.map(([path, uri, definition]) => (
-                                <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                              {dbActors.map(([path, uri, definition], idx) => (
+                                <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                                  {path}
                                 </option>
                               ))}
@@ -2397,8 +2677,8 @@ export default function OdrlEditor() {
                                   onChange={(e) => updateDutyConsequenceAction(dutyIdx, consIdx, e.target.value)}
                                 >
                                   <option value="">-- Select Consequence Action --</option>
-                                  {dbActions.map(([path, uri, definition]) => (
-                                    <option key={uri} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
+                                  {dbActions.map(([path, uri, definition], idx) => (
+                                    <option key={`${uri}-${idx}`} value={uri} title={`URI: ${uri}\nDefinition: ${definition}`}>
                                      {path}
                                     </option>
                                   ))}
@@ -2430,41 +2710,11 @@ export default function OdrlEditor() {
               })()}
           </section>
 
-          {/* Rule Tabs Footer Navigation */}
-          <section className="bg-white rounded-lg p-3 shadow border border-slate-200 flex flex-col gap-2">
-            <div className="flex items-center gap-3 border-b pb-1">
-              <h2 className="font-bold text-xs uppercase tracking-wider text-slate-500">RULE TABS</h2>
-              <button onClick={addPermissionBlock} className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Permission</button>
-              <button onClick={addProhibitionBlock} className="bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Prohibition</button>
-              <button onClick={addObligationBlock} className="bg-amber-600 hover:bg-amber-700 text-white font-medium px-2 py-0.5 rounded shadow text-[11px] transition-colors cursor-pointer">+ Add Obligation</button>
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1 overflow-x-auto max-h-24">
-              {(policy.permissions?.length > 0 || policy.prohibitions?.length > 0 || policy.obligations?.length > 0) ? (
-                <>
-                  {policy.permissions?.map((_, idx) => (
-                    <button key={`perm-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'permission', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'permission' && idx === activePermissionIdx.idx ? 'bg-blue-600 text-white border-blue-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
-                      PERMISSION #{idx + 1} (Rule)
-                    </button>
-                  ))}
-                  {policy.prohibitions?.map((_, idx) => (
-                    <button key={`prohib-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'prohibition', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'prohibition' && idx === activePermissionIdx.idx ? 'bg-rose-600 text-white border-rose-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
-                      PROHIBITION #{idx + 1} (Rule)
-                    </button>
-                  ))}
-				  {policy.obligations?.map((_, idx) => (
-                    <button key={`obl-${idx}`} type="button" onClick={() => setActivePermissionIdx({ type: 'obligation', idx })} className={`text-xs px-3 py-1.5 rounded font-medium border transition-all cursor-pointer shadow-xs ${activePermissionIdx.type === 'obligation' && idx === activePermissionIdx.idx ? 'bg-amber-600 text-white border-amber-600 font-bold scale-[1.02]' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}>
-                      OBLIGATION #{idx + 1} (Rule)
-                    </button>
-                  ))}
-                </>
-              ) : (
-                <span className="text-xs text-slate-400 italic py-1">No active tabs</span>
-              )}
-            </div>
-          </section>
+          
         </div>
 
         {/* Right Panel: Human Summary & JSON-LD / TTL Output */}
+		{!templateMode && (
         <section className="w-full lg:w-3/12 xl:w-1/4 flex flex-col gap-4 overflow-hidden h-full shrink-0">
           <HumanSummaryPanel policy={policy} activePermissionIdx={activePermissionIdx} />
 
@@ -2492,6 +2742,7 @@ export default function OdrlEditor() {
             </div>
           </div>
         </section>
+		)}
 
         {/* SHACL Report Modal Overlay */}
         {showShaclReport && shaclResult?.report && (

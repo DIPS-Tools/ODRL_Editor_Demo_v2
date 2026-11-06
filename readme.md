@@ -105,19 +105,27 @@ CHILD: When the user is ready, the user will click the Publish Policy button to 
 
 The user may user a number of URL Parameters to control elements of the behaviour of the UI.
 
-This example shows the current options:
+This example shows how options are expressed:
 
 http://localhost:5173/?showLeftPanel=false&showHeader=false&showCheckpointUndo=false&showPurpose=false&showLoadPolicyFromServer=false
 
-showLeftPanel - Turns the Metadata and SHACL panels on and off (default on) Values: true/false
+showLeftPanel - Turns the Metadata and SHACL panels on and off (default on if param not used) Values: true/false
+e.g. showLeftPanel=false
 
-showHeader - Turns the Header and buttons on and off (default on) Values: true/false
+showHeader - Turns the Header and buttons on and off (default on if param not used) Values: true/false
+e.g. showHeader=false
 
-showCheckpointUndo - Turns the Save Draft button on and off (default on) Values: true/false
+showCheckpointUndo - Turns the Save Draft button on and off (default on if param not used) Values: true/false
+e.g. showCheckpointUndo=false
 
-showPurpose - Turns the Purpose option button on and off (default off) Values: true/false
+showPurpose - Turns the Purpose option button on and off (default off if param not used) Values: true/false
+e.g. showPurpose=false
 
-showLoadPolicyFromServer - Turns the Load Policy from Server button on and off (default off) Values: true/false
+showLoadPolicyFromServer - Turns the Load Policy from Server button on and off (default off if param not used) Values: true/false
+e.g. showLoadPolicyFromServer=false
+
+lhoClassQuery - Turns on selection of constraint left hand operands based on the Action/Assignee/Assigner selected in the rule (it does not effect rule level constraint options) (default DEFAULT_LEFT_HAND_OPERAND_QUERY if param not used) Values: User specified - current supported DEFAULT_LEFT_HAND_OPERAND_QUERY, RELATED_LEFT_HAND_OPERAND_QUERY
+e.g. lhoClassQuery=RELATED_LEFT_HAND_OPERAND_QUERY
 
 
 
