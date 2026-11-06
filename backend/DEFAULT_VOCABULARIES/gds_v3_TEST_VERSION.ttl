@@ -1,0 +1,432 @@
+PREFIX cc: <http://creativecommons.org/ns#>
+PREFIX dcat: <http://www.w3.org/ns/dcat#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+PREFIX dpv: <https://w3id.org/dpv#>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX prof: <http://www.w3.org/ns/dx/prof/>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX role: <http://www.w3.org/ns/dx/prof/role/>
+PREFIX schema: <https://schema.org/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+PREFIX sw: <http://www.w3.org/2003/06/sw-vocab-status/ns#>
+PREFIX vann: <http://purl.org/vocab/vann/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX gds: <http://www.gate-ai.eu/gds#>
+
+PREFIX dpv-owl: <https://w3id.org/dpv/owl#>
+
+
+# ------------ Ontology Metadata ------------------ #
+
+<https://www.gate-ai.eu/gds> a owl:Ontology, prof:Profile ;
+    prof:isProfileOf <http://www.w3.org/ns/odrl/2/core> ;
+    prof:hasResource gds:gds-ttl ;
+    dcterms:title "ODRL Profile for Gate Data Space"@en ;
+    vann:preferredNamespacePrefix "gds" ;
+    vann:preferredNamespaceUri "http://www.gate-ai.eu/gds#" ;
+    rdfs:label "ODRL Profile for Gate Data Space"@en ;
+    owl:versionInfo "0.1" ;
+    dcterms:created "2025-12-23"^^xsd:date ;
+    dcterms:modified "2026-01-06"^^xsd:date ;
+    dcterms:issued "2026-02-05"^^xsd:date ;
+    dcterms:creator "" ;
+    dcterms:publisher "" ;
+    dcterms:abstract "ODRL Profile for the Gate Data Space that extends the ODRL Core Vocabulary to enable the definition of policies with additional semantics related to both regulatory frameworks - such as AIA, CDSA, DA, and related to data space concepts that need to be modelled"@en ;
+    dcterms:description "ODRL Profile for the Gate Data Space that extends the ODRL Core Vocabulary to enable the definition of policies with additional semantics related to both regulatory frameworks - such as AIA, CDSA, DA, and related to data space concepts that need to be modelled"@en ;
+    sw:term_status "unstable"@en ;
+    dcterms:source <http://www.w3.org/ns/odrl/2/>, <http://w3id.org/dpv> .
+
+gds:gds-ttl a prof:ResourceDescriptor ;
+    prof:hasRole role:vocabulary ;
+    prof:hasArtifact <https://www.gate-ai.eu/data-space/gate-data-space-profile/gds.ttl> ;
+    dcterms:title "ODRL Profile for Gate Data Space Turtle Vocabulary"@en ;
+    dcterms:format <https://www.iana.org/assignments/media-types/text/turtle> ;
+    dcterms:conformsTo <https://www.w3.org/TR/turtle> .
+
+<https://www.gate-ai.eu/gds#> a skos:Collection ;
+    skos:prefLabel "ODRL Profile for Gate Data Space Concepts"@en ;
+    skos:member odrl:annotate ;
+    skos:member odrl:anonymize ;
+    skos:member odrl:attribute ;
+    skos:member cc:Attribution ;
+    skos:member cc:CommercialUse ;
+    skos:member odrl:derive ;
+    skos:member odrl:distribute ;
+    skos:member cc:Distribution ;
+    skos:member odrl:extract ;
+    skos:member cc:Notice ;
+    skos:member odrl:obtainConsent ;
+    skos:member odrl:reproduce ;
+    skos:member cc:Reproduction ;
+    skos:member odrl:transform ;
+    skos:member odrl:count ;
+    skos:member odrl:event ;
+    skos:member odrl:purpose ;
+    skos:member odrl:policyUsage ;
+    skos:member gds:policyLevel ;
+    skos:member gds:PolicyLevel ;
+    skos:member gds:DataspaceLevel ;
+    skos:member gds:DiscoveryLevel ;
+    skos:member gds:ContractLevel ;
+    skos:member gds:UseLevel ;
+    skos:member gds:FederatedCatalogOffer ;
+    skos:member gds:Themes ;
+    skos:member gds:AirQuality ;
+    skos:member gds:UrbanMobility ;
+    skos:member gds:UrbanEnvironment ;
+    skos:member gds:GateInstitute ;
+    skos:member gds:SensorsDataSource ;
+    skos:member gds:TrafficMonitoringInfrastructure ;
+    skos:member gds:Data ;
+    skos:member gds:IPDataStatus ;
+    skos:member gds:Available ;
+    skos:member gds:ReservedByRightholder ;
+    skos:member gds:Participant ;
+    skos:member gds:Type ;
+    skos:member gds:LegalBasis ;
+    skos:member gds:TextAndDataMining ;
+    skos:member gds:Copy ;
+    skos:member gds:Store ;
+    skos:member gds:TechnicalOrganisationalMeasure ;
+    skos:member gds:ResearchResultsVerification ;
+    skos:member gds:DigitalUse ;
+    skos:member gds:IllustrationPurpose ;
+    skos:member gds:Reference ;
+    skos:member gds:Download ;
+    skos:member gds:Type ;
+    skos:member gds:GovernanceAuthority ;
+    skos:member gds:ParticipantStatus ;
+    skos:member gds:Active ;
+    skos:member gds:Suspended ;
+    skos:member gds:Access ;
+    skos:member gds:Location ;
+    skos:member gds:Join ;
+    skos:member gds:LegalMeasure ;
+    skos:member gds:HistoricalResearch .
+
+
+# ------------ Party Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#GateInstitute
+gds:GateInstitute a foaf:Organization, schema:ResearchOrganization, prov:Agent, dpv-owl:LegalEntity, odrl:Party, dcterms:Agent ;
+    rdfs:subClassOf dpv-owl:LegalEntity ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "GATE Institute" ;
+    rdfs:definition "The GATE Institute, acting as an organizational agent in the Gate Data Space" ;
+	skos:related gds:Data ;
+    foaf:name "Big Data for Smart Society - GATE Institute" .
+
+### https://www.gate-ai.eu/gds#Participant
+gds:Participant a odrl:Party, skos:Concept ;
+  rdfs:subClassOf dpv-owl:Entity ;
+  rdfs:isDefinedBy gds: ;
+  rdfs:label "Participant of the Gate Dataspace"@en ;
+  skos:related gds:Location ;
+  skos:definition "A Party representing a participant of the Gate Dataspace"@en .
+
+### https://www.gate-ai.eu/gds#GovernanceAuthority
+gds:GovernanceAuthority a odrl:PartyCollection, skos:Concept ;
+  rdfs:subClassOf dpv-owl:Entity ;
+  rdfs:isDefinedBy gds: ;
+  rdfs:label "Governance Authority of the Gate Dataspace"@en ;
+  skos:definition "A Party Collection representing all the participants of the Gate Dataspace Governance Authority"@en .
+
+# ------------ Action Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#Copy
+gds:Copy a odrl:Action, skos:Concept ;
+    rdfs:subClassOf dpv:Copy ;
+    rdfs:isDefinedBy gds: ;
+    odrl:includedIn odrl:use ;
+    rdfs:label "Copy"@en ;
+	skos:related gds:Data ;
+    skos:definition "To produce an exact reproduction of the data"@en .
+
+### https://www.gate-ai.eu/gds#Store
+gds:Store a odrl:Action, skos:Concept ;
+    rdfs:subClassOf dpv:Store ;
+    rdfs:isDefinedBy gds: ;
+    odrl:includedIn odrl:use ;
+    rdfs:label "Store"@en ;
+	skos:related gds:IPDataStatus ;
+    skos:definition "To keep data for future use"@en .
+
+### https://www.gate-ai.eu/gds#DigitalUse
+gds:DigitalUse a odrl:Action, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    odrl:includedIn odrl:use ;
+    rdfs:label "Digital Use"@en ;
+	skos:related gds:Type ;
+    skos:definition "To use resources in digital form"@en .
+
+### https://www.gate-ai.eu/gds#Download
+gds:Download a odrl:Action, skos:Concept ;
+    rdfs:subClassOf dpv:Download ;
+    rdfs:isDefinedBy gds: ;
+    odrl:includedIn odrl:use ;
+    rdfs:label "Download"@en ;
+    skos:definition "To provide a copy or to receive a copy of data over a network or internet"@en .
+
+### https://www.gate-ai.eu/gds#Access
+gds:Access a odrl:Action, skos:Concept ;
+    rdfs:subClassOf dpv:Access ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Access"@en ;
+    odrl:includedIn odrl:use ;
+    skos:definition "The right or opportunity to use something"@en .
+
+### https://www.gate-ai.eu/gds#Join
+gds:Join a odrl:Action, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    odrl:includedIn odrl:use ;
+    rdfs:label "Join"@en ;
+    skos:definition "Action allowing a party to join or become a participant of the Gate Dataspace"@en .
+
+# ------------ Left Operand Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#Data
+gds:Data a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:subClassOf dpv:Data ;
+    rdfs:label "Data"@en ;
+    skos:definition "A broad concept representing data or information"@en ;
+    rdfs:isDefinedBy gds: ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dpv:hasData property asserted in the associated metadata, thereby linking ODRL policy constraints with DPV-based declarations"@en .
+
+### https://www.gate-ai.eu/gds#IPDataStatus
+gds:IPDataStatus a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "IP Data Status" ;
+    skos:definition "Representing the status of the asset"@en ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the adms:status property asserted in the associated metadata"@en .
+
+### https://www.gate-ai.eu/gds#Type
+gds:Type a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Type" ;
+    skos:definition "Representing the party's type"@en ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the rdf:type property asserted in the associated metadata"@en .
+
+### https://www.gate-ai.eu/gds#LegalBasis
+gds:LegalBasis a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:subClassOf dpv:LegalBasis ;
+    rdfs:label "Legal Basis"@en ;
+    skos:definition "Used to justify processing of data or use of technology in accordance with a law"@en ;
+    rdfs:isDefinedBy gds: ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dpv:hasLegalBasis property asserted in the associated metadata, thereby linking ODRL policy constraints with DPV-based legal basis declarations"@en .
+
+### https://www.gate-ai.eu/gds#TechnicalOrganisationalMeasure
+gds:TechnicalOrganisationalMeasure a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:subClassOf dpv:TechnicalOrganisationalMeasure ;
+    rdfs:label "Technical and Organisational Measure"@en ;
+    skos:definition "Used to safeguard and ensure good practices in connection with data and technologies"@en ;
+    rdfs:isDefinedBy gds: ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dpv:hasTechnicalOrganisationalMeasure property asserted in the associated metadata"@en .
+
+### https://www.gate-ai.eu/gds#Reference
+gds:Reference a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Reference" ;
+    skos:definition "Left operand representing a reference associated with something that is mentioned, showing where particular information was found"@en ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dcterms:references property asserted in the associated metadata"@en .
+
+### https://www.gate-ai.eu/gds#Time
+gds:Time a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Time"@en ;
+    skos:definition "The time of exercising the action of the Rule. Right operand value MUST be a valid xsd:time"@en .
+
+### https://www.gate-ai.eu/gds#ParticipantStatus
+gds:ParticipantStatus a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Participant Status" ;
+    skos:definition "Representing the status of the participant"@en .
+
+### https://www.gate-ai.eu/gds#Location
+gds:Location a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:subClassOf dpv:Location ;
+    rdfs:label "Location"@en ;
+    skos:definition "A position, site, or area where something is located"@en ;
+    rdfs:isDefinedBy gds: ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dpv:hasLocation property asserted in the associated metadata"@en .
+
+### https://www.gate-ai.eu/gds#LegalMeasure
+gds:LegalMeasure a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:subClassOf dpv:LegalMeasure ;
+    rdfs:label "Legal Measure"@en ;
+    skos:definition "Used to safeguard and ensure good practices in connection with data and technologies"@en ;
+    rdfs:isDefinedBy gds: ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dpv:hasLegalMeasure property asserted in the associated metadata"@en .
+	
+
+### https://www.gate-ai.eu/gds#MembershipCredential.since
+gds:MembershipCredential.since a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    ### rdfs:subClassOf dpv:LegalMeasure ;
+    rdfs:label "Membership Since"@en ;
+    skos:definition "Used to safeguard and ensure good practices in connection with data and technologies"@en ;
+    rdfs:isDefinedBy gds: ;
+    skos:note "Enforcement of this left operand is intended to be performed by matching the policy constraint value against the dpv:hasLegalMeasure property asserted in the associated metadata"@en .
+	
+
+# ------------ Asset Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#FederatedCatalog
+gds:FederatedCatalogOffer a odrl:Asset, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Federated Catalog Offer"@en ;
+    skos:definition "Gate Dataspace Federated Catalog"@en ;
+    dcat:themeTaxonomy gds:Themes .
+
+# ------------ Theme Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#Themes
+gds:Themes a skos:ConceptScheme ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Themes"@en ;
+    skos:definition "A controlled set of domains used to classify assets in the Gate Data Space"@en .
+
+### https://www.gate-ai.eu/gds#AirQuality
+gds:AirQuality a skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Air Quality Theme"@en ;
+    rdfs:definition "Theme covering air quality-related data assets in the Gate Data Space"@en ;
+    skos:inScheme gds:Themes .
+
+### https://www.gate-ai.eu/gds#UrbanMobility
+gds:UrbanMobility a skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Urban Mobility Theme"@en ;
+    rdfs:definition "Theme covering data related to transportation systems, traffic flow, public transport, and mobility patterns in urban environments"@en ;
+    skos:inScheme gds:Themes .
+
+### https://www.gate-ai.eu/gds#UrbanEnvironment
+gds:UrbanEnvironment a skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Urban Environment"@en ;
+    rdfs:definition "Theme covering data related to parks, vegetation, green infrastructure, and natural areas within urban environments"@en ;
+    skos:inScheme gds:Themes .
+
+# ------------ Purpose Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#TextAndDataMining
+#gds:TextAndDataMining a rdfs:Class, skos:Concept, dpv-owl:Purpose ;
+#    rdfs:isDefinedBy gds: ;
+#    skos:broader odrl:Purpose ;
+#    rdfs:label "Text and Data Mining"@en ;
+#    skos:definition "Any automated analytical technique aimed at analysing text and data in digital form in order to generate information which includes but is not limited to patterns, trends and correlations"@en .
+
+#gds:TextAndDataMining a dpv-owl:Purpose , skos:Concept  ;
+#    rdfs:isDefinedBy gds: ;
+#    skos:broader dpv-owl:ScientificResearch;
+#    rdfs:label "Text and Data Mining"@en ;
+#    rdfs:definition "Any automated analytical technique aimed at analysing text and data in digital form in order to generate information which includes but is not limited to patterns, trends and correlations"@en .
+	
+gds:MedicalResearch a dpv-owl:Purpose , skos:Concept ;
+	rdfs:isDefinedBy <http://example.org> ;
+	rdfs:label "Medical Research"@en ;
+	skos:prefLabel "Medical Research"@en ;
+	skos:broader dpv-owl:ScientificResearch .
+
+### https://www.gate-ai.eu/gds#ResearchResultsVerification
+#gds:ResearchResultsVerification a rdfs:Class, skos:Concept, dpv-owl:Purpose ;
+#    rdfs:isDefinedBy gds: ;
+#    skos:broader odrl:Purpose ;
+#    rdfs:label "Research Results Verification"@en ;
+#    skos:definition "Processing of data for the purpose of verifying, reproducing, or validating the results of scientific or technical research, ensuring accuracy and reliability of findings"@en .
+
+### https://www.gate-ai.eu/gds#IllustrationPurpose
+#gds:IllustrationPurpose a rdfs:Class, skos:Concept, dpv-owl:Purpose ;
+#    rdfs:isDefinedBy gds: ;
+#    skos:broader odrl:Purpose ;
+#    rdfs:label "Illustration for Teaching Purpose"@en ;
+#    skos:definition "Related to creating examples, demonstrations, or illustrative materials for the purposes of teaching"@en .
+
+### https://www.gate-ai.eu/gds#HistoricalResearch
+#gds:HistoricalResearch a rdfs:Class, skos:Concept, dpv-owl:Purpose ;
+#    rdfs:isDefinedBy gds: ;
+#    skos:broader odrl:Purpose ;
+#    rdfs:label "Historical Research Purpose"@en ;
+#    skos:definition "Purposes associated with historical research"@en .
+
+# ------------ Data Source Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#SensorsDataSource
+gds:SensorsDataSource a dpv:DataSource ;
+    rdfs:label "Sensors Data Source"@en ;
+    rdfs:definition "Data source representing data collected from sensors deployed in urban environments."@en ;
+    rdfs:isDefinedBy gds: .
+
+### https://www.gate-ai.eu/gds#TrafficMonitoringInfrastructure
+gds:TrafficMonitoringInfrastructure a dpv:DataSource ;
+    rdfs:label "Traffic Monitoring Infrastructure"@en ;
+    rdfs:definition "Data source representing data collected from traffic monitoring infrastructure in urban environments."@en ;
+    rdfs:isDefinedBy gds: .
+
+# ------------ Status Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#Available
+gds:Available a owl:Class, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Available Status"@en ;
+    skos:definition "Status of asset that is available"@en .
+
+### https://www.gate-ai.eu/gds#ReservedByRightholder
+gds:ReservedByRightholder a owl:Class, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Reserved By Rightholder Status"@en ;
+    skos:definition "Status of asset that is reserved by rightholder"@en .
+
+### https://www.gate-ai.eu/gds#Active
+gds:Active a owl:Class, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Active Status" ;
+    skos:definition "Status of participant that is active" .
+
+### https://www.gate-ai.eu/gds#Suspended
+gds:Suspended a owl:Class, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Suspended Status" ;
+    skos:definition "Status of participant that is suspended" .
+
+# ------------ Policy Level Concepts ------------------ #
+
+### https://www.gate-ai.eu/gds#policyLevel
+gds:policyLevel a rdf:Property, owl:ObjectProperty, skos:Concept ;
+    rdfs:domain odrl:Policy ;
+    rdfs:range gds:PolicyLevel ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Policy Level (ISO/IEC WD3 20151)" ;
+    skos:definition "Defines the overarching policy level according to ISO/IEC WD3 20151 - dataspace, discovery, contract, use"@en .
+
+### https://www.gate-ai.eu/gds#PolicyLevel
+gds:PolicyLevel a rdfs:Class, owl:Class, skos:Concept ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Policy Level" ;
+    skos:definition "Policy Level class according to ISO/IEC WD3 20151 - dataspace, discovery, contract, use"@en .
+
+### https://www.gate-ai.eu/gds#DataspaceLevel
+gds:DataspaceLevel a owl:NamedIndividual, skos:Concept, gds:PolicyLevel ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Dataspace Level" ;
+    skos:definition "Dataspace /Membership/ Policies" .
+
+### https://www.gate-ai.eu/gds#DiscoveryLevel
+gds:DiscoveryLevel a owl:NamedIndividual, skos:Concept, gds:PolicyLevel ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Discovery Level" ;
+    skos:definition "Discovery /Access/ Policies" .
+
+### https://www.gate-ai.eu/gds#ContractLevel
+gds:ContractLevel a owl:NamedIndividual, skos:Concept, gds:PolicyLevel ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Data Contract Level" ;
+    skos:definition "Contract Policies" .
+
+### https://www.gate-ai.eu/gds#UseLevel
+gds:UseLevel a owl:NamedIndividual, skos:Concept, gds:PolicyLevel ;
+    rdfs:isDefinedBy gds: ;
+    rdfs:label "Data Use Level" ;
+    skos:definition "Data Use Policies" .
